@@ -31,12 +31,15 @@ ALIGNING, ACTIVE = "ALIGNING", "ACTIVE"
 
 def _die_with_parent() -> None:
     """Child-side: ask Linux to SIGTERM the worker when our process dies (prctl PR_SET_PDEATHSIG).
-    A worker's SIGTERM handler releases the arm (zero torque) - same as a normal close()."""
+    A worker's SIGTERM handler releases the arm (zero torque) - same as a normal close().
+    """
     try:
         import ctypes
         import signal
 
-        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # 1 = PR_SET_PDEATHSIG
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(
+            1, signal.SIGTERM
+        )  # 1 = PR_SET_PDEATHSIG
     except (OSError, AttributeError):
         pass
 
@@ -52,8 +55,15 @@ def _load_ports(teleop_config: Path) -> dict[str, int]:
 
 
 class FollowerArms:
-    def __init__(self, si_root: Path, si_python: Path, teleop_config: Path, rpc_timeout: float = 0.1,
-                 start_timeout: float = 30.0, log_dir: Path | None = None):
+    def __init__(
+        self,
+        si_root: Path,
+        si_python: Path,
+        teleop_config: Path,
+        rpc_timeout: float = 0.1,
+        start_timeout: float = 30.0,
+        log_dir: Path | None = None,
+    ):
         import portal
 
         self.si_root = si_root
@@ -79,7 +89,14 @@ class FollowerArms:
             self.close()  # never leave a half-started worker holding an arm / CAN bus
             raise
 
-    def _start(self, si_root: Path, si_python: Path, teleop_config: Path, start_timeout: float, portal) -> None:
+    def _start(
+        self,
+        si_root: Path,
+        si_python: Path,
+        teleop_config: Path,
+        start_timeout: float,
+        portal,
+    ) -> None:
         log_dir = self.log_dir
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
@@ -88,13 +105,28 @@ class FollowerArms:
             out = None
             if log_dir:
                 try:
-                    out = open(log_dir / f"worker_{side}.log", "w")  # noqa: SIM115 - owned by the child
+                    out = open(
+                        log_dir / f"worker_{side}.log", "w"
+                    )  # noqa: SIM115 - owned by the child
                 except OSError as exc:
                     print(f"warning: cannot create worker log: {exc}", file=sys.stderr)
             self.procs[side] = subprocess.Popen(
-                [str(si_python), "-m", "devices.robots.i2rt_teleop.worker", "--config", str(teleop_config),
-                 "--side", side, "--role", "follower"],
-                cwd=si_root, env=env, start_new_session=True, stdout=out, stderr=subprocess.STDOUT if out else None,
+                [
+                    str(si_python),
+                    "-m",
+                    "devices.robots.i2rt_teleop.worker",
+                    "--config",
+                    str(teleop_config),
+                    "--side",
+                    side,
+                    "--role",
+                    "follower",
+                ],
+                cwd=si_root,
+                env=env,
+                start_new_session=True,
+                stdout=out,
+                stderr=subprocess.STDOUT if out else None,
                 preexec_fn=_die_with_parent,  # no orphan workers even if this program is killed
             )
         # portal.Client blocks forever inside call() while the server is down, so first wait for the
@@ -105,13 +137,17 @@ class FollowerArms:
             self._check_procs()
             for s in list(pending):
                 try:
-                    with socket.create_connection(("127.0.0.1", self.ports[s]), timeout=0.2):
+                    with socket.create_connection(
+                        ("127.0.0.1", self.ports[s]), timeout=0.2
+                    ):
                         pending.discard(s)
                 except OSError:
                     pass
             if pending and time.monotonic() > deadline:
-                raise TimeoutError(f"follower workers not ready after {start_timeout:.0f}s: {sorted(pending)} "
-                                   f"(left: {self._worker_error('left')}; right: {self._worker_error('right')})")
+                raise TimeoutError(
+                    f"follower workers not ready after {start_timeout:.0f}s: {sorted(pending)} "
+                    f"(left: {self._worker_error('left')}; right: {self._worker_error('right')})"
+                )
             if pending:
                 time.sleep(0.2)
         self.clients = {s: portal.Client(f"127.0.0.1:{self.ports[s]}") for s in SIDES}
@@ -122,7 +158,9 @@ class FollowerArms:
     def _check_procs(self) -> None:
         for s, p in self.procs.items():
             if p.poll() is not None:
-                raise RuntimeError(f"{s} follower worker exited with code {p.returncode}: {self._worker_error(s)}")
+                raise RuntimeError(
+                    f"{s} follower worker exited with code {p.returncode}: {self._worker_error(s)}"
+                )
 
     def _worker_error(self, side: str) -> str:
         """Last error line of a worker log (ANSI colours stripped)."""
@@ -130,15 +168,21 @@ class FollowerArms:
             return "see worker output"
         path = self.log_dir / f"worker_{side}.log"
         try:
-            lines = re.sub(r"\x1b\[[0-9;]*m", "", path.read_text(errors="replace")).splitlines()
+            lines = re.sub(
+                r"\x1b\[[0-9;]*m", "", path.read_text(errors="replace")
+            ).splitlines()
         except OSError:
             return f"see {path}"
-        errors = [ln.strip() for ln in lines if "Error:" in ln or "failed" in ln.lower()]
+        errors = [
+            ln.strip() for ln in lines if "Error:" in ln or "failed" in ln.lower()
+        ]
         return (errors[-1] if errors else "no error line") + f"  (full log: {path})"
 
     def _call(self, side: str, method: str, *args, timeout: float | None = None):
         with self._rpc_lock:
-            return getattr(self.clients[side], method)(*args).result(timeout=timeout or self.timeout)
+            return getattr(self.clients[side], method)(*args).result(
+                timeout=timeout or self.timeout
+            )
 
     def _heartbeat_loop(self) -> None:
         while not self._hb_stop.wait(0.01):
@@ -149,13 +193,17 @@ class FollowerArms:
                     continue
                 try:
                     self._send(self._last_target, self._phase)
-                except Exception as exc:  # noqa: BLE001 - surfaced through get_state / heartbeat_error
+                except (
+                    Exception
+                ) as exc:  # noqa: BLE001 - surfaced through get_state / heartbeat_error
                     self.heartbeat_error = str(exc)
                     self._last_target = None  # stop hammering a faulted worker
 
     def _start_heartbeat(self) -> None:
         if self._hb_thread is None:
-            self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name="arm-heartbeat")
+            self._hb_thread = threading.Thread(
+                target=self._heartbeat_loop, daemon=True, name="arm-heartbeat"
+            )
             self._hb_thread.start()
 
     def get_state(self) -> np.ndarray:
@@ -215,10 +263,17 @@ class FollowerArms:
         self.seq += 1
         issued = time.monotonic_ns()
         futures = [
-            self.clients[s].submit_control_frame({
-                "session_id": self.session, "sequence": self.seq, "issued_at_ns": issued, "phase": phase,
-                "joint_position": np.asarray(target14[i * 7:(i + 1) * 7], dtype=np.float64),
-            })
+            self.clients[s].submit_control_frame(
+                {
+                    "session_id": self.session,
+                    "sequence": self.seq,
+                    "issued_at_ns": issued,
+                    "phase": phase,
+                    "joint_position": np.asarray(
+                        target14[i * 7 : (i + 1) * 7], dtype=np.float64
+                    ),
+                }
+            )
             for i, s in enumerate(SIDES)
         ]
         for f in futures:

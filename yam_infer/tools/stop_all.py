@@ -36,7 +36,9 @@ INFER = re.escape(str(PROJECT_VENV)) + r"/bin/python[0-9.]* -m yam_infer\.run"
 
 def _pids(pattern: str) -> list[int]:
     """Only real python module processes (never shells whose command line merely mentions the name)."""
-    out = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True).stdout.split()
+    out = subprocess.run(
+        ["pgrep", "-f", pattern], capture_output=True, text=True
+    ).stdout.split()
     return [int(p) for p in out if int(p) not in (os.getpid(), os.getppid())]
 
 
@@ -74,9 +76,18 @@ def home_side(port: int, side: str, target7: np.ndarray, speed: float) -> None:
         def send():
             with lock:
                 seq[0] += 1
-                _call(client, "submit_control_frame", {
-                    "session_id": session, "sequence": seq[0], "issued_at_ns": time.monotonic_ns(),
-                    "phase": phase[0], "joint_position": current[0]}, timeout=0.2)
+                _call(
+                    client,
+                    "submit_control_frame",
+                    {
+                        "session_id": session,
+                        "sequence": seq[0],
+                        "issued_at_ns": time.monotonic_ns(),
+                        "phase": phase[0],
+                        "joint_position": current[0],
+                    },
+                    timeout=0.2,
+                )
 
         def heartbeat():  # keep the 150 ms command lease alive
             while not stop.wait(0.02):
@@ -111,10 +122,14 @@ def home_side(port: int, side: str, target7: np.ndarray, speed: float) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--record-dir", default="runs_infer")
     p.add_argument("--teleop-config", default="")
-    p.add_argument("--no-home", action="store_true", help="just stop everything (arms drop!)")
+    p.add_argument(
+        "--no-home", action="store_true", help="just stop everything (arms drop!)"
+    )
     p.add_argument("--speed", type=float, default=0.4, help="rad/s peak")
     args = p.parse_args()
 
@@ -143,9 +158,11 @@ def main() -> None:
                 print(f"  {side}: no worker running")
                 continue
             try:
-                home_side(ports[side], side, rest[i * 7:(i + 1) * 7], args.speed)
+                home_side(ports[side], side, rest[i * 7 : (i + 1) * 7], args.speed)
             except Exception as exc:  # noqa: BLE001
-                print(f"  {side}: could not move home ({exc}) -> it will be released where it is")
+                print(
+                    f"  {side}: could not move home ({exc}) -> it will be released where it is"
+                )
 
     pids = _pids(WORKER)
     for pid in pids:
@@ -156,7 +173,11 @@ def main() -> None:
         time.sleep(0.2)
     for pid in _pids(WORKER):
         os.kill(pid, signal.SIGKILL)
-    print("all stopped" if not (_pids(WORKER) + _pids(INFER)) else "WARNING: still running")
+    print(
+        "all stopped"
+        if not (_pids(WORKER) + _pids(INFER))
+        else "WARNING: still running"
+    )
 
 
 if __name__ == "__main__":

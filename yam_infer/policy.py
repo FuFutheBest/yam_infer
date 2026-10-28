@@ -15,9 +15,13 @@ import torch
 from yam_infer.model.act import ACT, ACTConfig
 
 
-def preprocess_frame(rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True) -> np.ndarray:
+def preprocess_frame(
+    rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True
+) -> np.ndarray:
     """RGB uint8 (480,640,3) -> RGB uint8 (H,W,3) exactly like the training pipeline."""
-    if jpeg_roundtrip:  # the training images went through the recorder's JPEG q90 encoder
+    if (
+        jpeg_roundtrip
+    ):  # the training images went through the recorder's JPEG q90 encoder
         ok, buf = cv2.imencode(".jpg", rgb[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:
             decoded = cv2.imdecode(buf, cv2.IMREAD_COLOR)
@@ -28,7 +32,9 @@ def preprocess_frame(rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: 
 
 
 class Policy:
-    def __init__(self, ckpt_path: str | Path, device: str = "auto", jpeg_roundtrip: bool = True):
+    def __init__(
+        self, ckpt_path: str | Path, device: str = "auto", jpeg_roundtrip: bool = True
+    ):
         ck = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,12 +50,18 @@ class Policy:
         self.fps = float(ck["fps"])
         self.start_pose = {k: np.asarray(v) for k, v in ck["start_pose"].items()}
         st = ck["stats"]
-        self.q_mean, self.q_std = np.asarray(st["qpos"]["mean"]), np.asarray(st["qpos"]["std"])
+        self.q_mean, self.q_std = np.asarray(st["qpos"]["mean"]), np.asarray(
+            st["qpos"]["std"]
+        )
         self.action_mode = ck.get("action_mode", "abs")
-        norm = ck.get("action_norm", st["action"])  # stats of the network output (abs or delta)
+        norm = ck.get(
+            "action_norm", st["action"]
+        )  # stats of the network output (abs or delta)
         self.a_mean, self.a_std = np.asarray(norm["mean"]), np.asarray(norm["std"])
         # absolute leader range seen in the demos -> used by the safety filter
-        self.a_min, self.a_max = np.asarray(st["action"]["min"]), np.asarray(st["action"]["max"])
+        self.a_min, self.a_max = np.asarray(st["action"]["min"]), np.asarray(
+            st["action"]["max"]
+        )
         self.step = ck.get("step")
         self.jpeg_roundtrip = jpeg_roundtrip
 
@@ -59,24 +71,47 @@ class Policy:
 
     def info(self) -> dict:
         return {
-            "tasks": self.tasks, "cameras": self.cameras, "image_size": list(self.image_size), "fps": self.fps,
-            "chunk_size": self.chunk_size, "train_step": self.step, "device": str(self.device),
+            "tasks": self.tasks,
+            "cameras": self.cameras,
+            "image_size": list(self.image_size),
+            "fps": self.fps,
+            "chunk_size": self.chunk_size,
+            "train_step": self.step,
+            "device": str(self.device),
             "action_mode": self.action_mode,
             "start_pose": {k: v.tolist() for k, v in self.start_pose.items()},
-            "action_min": self.a_min.tolist(), "action_max": self.a_max.tolist(),
+            "action_min": self.a_min.tolist(),
+            "action_max": self.a_max.tolist(),
         }
 
     def prepare(self, frames: dict[str, np.ndarray]) -> np.ndarray:
         """Raw camera frames -> (n_cam, H, W, 3) uint8 model input (also what the recorder saves)."""
-        return np.stack([preprocess_frame(frames[c], self.image_size, self.jpeg_roundtrip) for c in self.cameras])
+        return np.stack(
+            [
+                preprocess_frame(frames[c], self.image_size, self.jpeg_roundtrip)
+                for c in self.cameras
+            ]
+        )
 
     @torch.no_grad()
-    def predict_prepared(self, images: np.ndarray, qpos: np.ndarray, task: str) -> np.ndarray:
+    def predict_prepared(
+        self, images: np.ndarray, qpos: np.ndarray, task: str
+    ) -> np.ndarray:
         """images (n_cam,H,W,3) uint8, qpos (14,) -> actions (K,14) in rad / gripper 0..1."""
-        img = torch.from_numpy(images).to(self.device).permute(0, 3, 1, 2).float().div_(255.0)[None]
-        q = torch.from_numpy(((qpos - self.q_mean) / self.q_std).astype(np.float32)).to(self.device)[None]
+        img = (
+            torch.from_numpy(images)
+            .to(self.device)
+            .permute(0, 3, 1, 2)
+            .float()
+            .div_(255.0)[None]
+        )
+        q = torch.from_numpy(((qpos - self.q_mean) / self.q_std).astype(np.float32)).to(
+            self.device
+        )[None]
         t = torch.tensor([self.tasks.index(task)], device=self.device)
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
+        with torch.autocast(
+            "cuda", dtype=torch.bfloat16, enabled=self.device.type == "cuda"
+        ):
             pred, _, _ = self.model(img, q, t)
         return self.to_absolute(pred[0].float().cpu().numpy(), qpos)
 
@@ -87,6 +122,8 @@ class Policy:
             act = act + np.asarray(qpos)[..., None, :]
         return act
 
-    def predict(self, frames: dict[str, np.ndarray], qpos: np.ndarray, task: str) -> tuple[np.ndarray, np.ndarray]:
+    def predict(
+        self, frames: dict[str, np.ndarray], qpos: np.ndarray, task: str
+    ) -> tuple[np.ndarray, np.ndarray]:
         images = self.prepare(frames)
         return self.predict_prepared(images, qpos, task), images

@@ -49,7 +49,9 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 def sinusoid_1d(n: int, d: int) -> torch.Tensor:
     pos = torch.arange(n, dtype=torch.float32)[:, None]
-    div = torch.exp(torch.arange(0, d, 2, dtype=torch.float32) * (-math.log(10000.0) / d))
+    div = torch.exp(
+        torch.arange(0, d, 2, dtype=torch.float32) * (-math.log(10000.0) / d)
+    )
     pe = torch.zeros(n, d)
     pe[:, 0::2] = torch.sin(pos * div)
     pe[:, 1::2] = torch.cos(pos * div)
@@ -69,13 +71,22 @@ def _resnet_backbone(name: str, pretrained: bool) -> nn.Module:
     from torchvision.ops.misc import FrozenBatchNorm2d
 
     weights = "IMAGENET1K_V1" if pretrained else None
-    net = getattr(torchvision.models, name)(weights=weights, norm_layer=FrozenBatchNorm2d)
-    return nn.Sequential(*list(net.children())[:-2])  # drop avgpool + fc -> (B, 512, H/32, W/32)
+    net = getattr(torchvision.models, name)(
+        weights=weights, norm_layer=FrozenBatchNorm2d
+    )
+    return nn.Sequential(
+        *list(net.children())[:-2]
+    )  # drop avgpool + fc -> (B, 512, H/32, W/32)
 
 
 def _enc_layer(cfg: ACTConfig) -> nn.TransformerEncoderLayer:
     return nn.TransformerEncoderLayer(
-        cfg.d_model, cfg.n_heads, cfg.dim_feedforward, cfg.dropout, batch_first=True, norm_first=True
+        cfg.d_model,
+        cfg.n_heads,
+        cfg.dim_feedforward,
+        cfg.dropout,
+        batch_first=True,
+        norm_first=True,
     )
 
 
@@ -92,10 +103,17 @@ class ACT(nn.Module):
         self.task_embed = nn.Embedding(cfg.n_tasks, d)
         self.extra_pos = nn.Parameter(torch.zeros(3, d))  # latent, state, task tokens
 
-        self.encoder = nn.TransformerEncoder(_enc_layer(cfg), cfg.n_encoder_layers, enable_nested_tensor=False)
+        self.encoder = nn.TransformerEncoder(
+            _enc_layer(cfg), cfg.n_encoder_layers, enable_nested_tensor=False
+        )
         self.decoder = nn.TransformerDecoder(
             nn.TransformerDecoderLayer(
-                d, cfg.n_heads, cfg.dim_feedforward, cfg.dropout, batch_first=True, norm_first=True
+                d,
+                cfg.n_heads,
+                cfg.dim_feedforward,
+                cfg.dropout,
+                batch_first=True,
+                norm_first=True,
             ),
             cfg.n_decoder_layers,
         )
@@ -108,14 +126,22 @@ class ACT(nn.Module):
         self.vae_cls = nn.Parameter(torch.zeros(1, 1, d))
         self.vae_state_proj = nn.Linear(cfg.state_dim, d)
         self.vae_action_proj = nn.Linear(cfg.action_dim, d)
-        self.vae_encoder = nn.TransformerEncoder(_enc_layer(cfg), cfg.n_vae_layers, enable_nested_tensor=False)
+        self.vae_encoder = nn.TransformerEncoder(
+            _enc_layer(cfg), cfg.n_vae_layers, enable_nested_tensor=False
+        )
         self.vae_out = nn.Linear(d, 2 * cfg.latent_dim)
         self.vae_pos: torch.Tensor
         self.img_mean: torch.Tensor
         self.img_std: torch.Tensor
-        self.register_buffer("vae_pos", sinusoid_1d(cfg.chunk_size + 2, d), persistent=False)
-        self.register_buffer("img_mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1), persistent=False)
-        self.register_buffer("img_std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1), persistent=False)
+        self.register_buffer(
+            "vae_pos", sinusoid_1d(cfg.chunk_size + 2, d), persistent=False
+        )
+        self.register_buffer(
+            "img_mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1), persistent=False
+        )
+        self.register_buffer(
+            "img_std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1), persistent=False
+        )
 
     # ------------------------------------------------------------------ helpers
     def backbone_parameters(self):
@@ -133,13 +159,19 @@ class ACT(nn.Module):
         fh, fw = feat.shape[-2:]
         pos = sinusoid_2d(fh, fw, self.cfg.d_model).to(feat.device, feat.dtype)
         tokens = feat.flatten(2).transpose(1, 2) + pos  # (B*n, fh*fw, d)
-        tokens = tokens.reshape(b, n, fh * fw, -1) + self.cam_embed[None, :, None, :].to(tokens.dtype)
+        tokens = tokens.reshape(b, n, fh * fw, -1) + self.cam_embed[
+            None, :, None, :
+        ].to(tokens.dtype)
         return tokens.reshape(b, n * fh * fw, -1)
 
     def encode_latent(self, qpos: torch.Tensor, actions: torch.Tensor):
         b = qpos.shape[0]
         tokens = torch.cat(
-            [self.vae_cls.expand(b, -1, -1), self.vae_state_proj(qpos)[:, None], self.vae_action_proj(actions)],
+            [
+                self.vae_cls.expand(b, -1, -1),
+                self.vae_state_proj(qpos)[:, None],
+                self.vae_action_proj(actions),
+            ],
             dim=1,
         )
         tokens = tokens + self.vae_pos[None, : tokens.shape[1]]
@@ -156,11 +188,17 @@ class ACT(nn.Module):
             z = mu + torch.randn_like(mu) * (0.5 * logvar).exp()
         else:
             mu = logvar = None
-            z = torch.zeros(b, self.cfg.latent_dim, device=qpos.device, dtype=qpos.dtype)
+            z = torch.zeros(
+                b, self.cfg.latent_dim, device=qpos.device, dtype=qpos.dtype
+            )
 
-        extra = torch.stack(
-            [self.latent_proj(z), self.state_proj(qpos), self.task_embed(task)], dim=1
-        ) + self.extra_pos[None]
+        extra = (
+            torch.stack(
+                [self.latent_proj(z), self.state_proj(qpos), self.task_embed(task)],
+                dim=1,
+            )
+            + self.extra_pos[None]
+        )
         memory = self.encoder(torch.cat([extra, self.encode_images(images)], dim=1))
         memory = self.memory_norm(memory)
         queries = self.query_embed[None].expand(b, -1, -1)
@@ -169,6 +207,8 @@ class ACT(nn.Module):
 
 
 def act_loss(pred, target, is_pad, mu, logvar, kl_weight: float):
-    l1 = (F.l1_loss(pred, target, reduction="none").mean(-1) * (~is_pad)).sum() / (~is_pad).sum().clamp(min=1)
+    l1 = (F.l1_loss(pred, target, reduction="none").mean(-1) * (~is_pad)).sum() / (
+        ~is_pad
+    ).sum().clamp(min=1)
     kl = (-0.5 * (1 + logvar - mu.pow(2) - logvar.exp())).sum(-1).mean()
     return l1 + kl_weight * kl, l1, kl

@@ -3,13 +3,16 @@
 # Stop the data-collection WebUI (start.sh) first: it owns the CAN buses and cameras.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
-[ -f robot.env ] && . ./robot.env          # machine-specific: SI_ROOT, CKPT
+[ -f robot.env ] && . ./robot.env # machine-specific: SI_ROOT, CKPT
 SI_ROOT="${SI_ROOT:-$HOME/SuperInference-feat-i2rt_NEDF3}"
 CKPT="${CKPT:-models/act_v2_all.pt}"
 case "${1:-}" in
-  banana) TASK=put_banana_in_bowl ;;
-  block)  TASK=put_blue_block_in_blue_cup ;;
-  *) echo "usage: $0 banana|block [args]"; exit 1 ;;
+banana) TASK=put_banana_in_bowl ;;
+block) TASK=put_blue_block_in_blue_cup ;;
+*)
+  echo "usage: $0 banana|block [args]"
+  exit 1
+  ;;
 esac
 shift
 if pgrep -f "python[0-9.]* -m (incubator\.nedf3\.I2RT_DM3\.web|devices\.robots\.i2rt_teleop)" >/dev/null; then

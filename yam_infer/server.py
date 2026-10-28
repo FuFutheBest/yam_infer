@@ -48,7 +48,11 @@ def _recv(sock: socket.socket) -> tuple[dict, list[bytes]]:
 def _encode(images: np.ndarray) -> list[bytes]:
     out = []
     for img in images:
-        ok, buf = cv2.imencode(".jpg", np.ascontiguousarray(img[:, :, ::-1]), [cv2.IMWRITE_JPEG_QUALITY, 95])
+        ok, buf = cv2.imencode(
+            ".jpg",
+            np.ascontiguousarray(img[:, :, ::-1]),
+            [cv2.IMWRITE_JPEG_QUALITY, 95],
+        )
         if not ok:
             raise RuntimeError("JPEG encode failed")
         out.append(buf.tobytes())
@@ -89,9 +93,17 @@ class RemotePolicy:
     def predict(self, frames: dict[str, np.ndarray], qpos: np.ndarray, task: str):
         from yam_infer.policy import preprocess_frame
 
-        images = np.stack([preprocess_frame(frames[c], self.image_size, self.jpeg_roundtrip) for c in self.cameras])
-        _send(self.sock, {"cmd": "predict", "qpos": np.asarray(qpos, float).tolist(), "task": task},
-              _encode(images))
+        images = np.stack(
+            [
+                preprocess_frame(frames[c], self.image_size, self.jpeg_roundtrip)
+                for c in self.cameras
+            ]
+        )
+        _send(
+            self.sock,
+            {"cmd": "predict", "qpos": np.asarray(qpos, float).tolist(), "task": task},
+            _encode(images),
+        )
         reply, _ = _recv(self.sock)
         if "error" in reply:
             raise RuntimeError(f"server error: {reply['error']}")
@@ -103,7 +115,9 @@ def main() -> None:
 
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--host", default="127.0.0.1", help="use the LAN IP to accept the robot PC")
+    p.add_argument(
+        "--host", default="127.0.0.1", help="use the LAN IP to accept the robot PC"
+    )
     p.add_argument("--port", type=int, default=5555)
     p.add_argument("--device", default="auto")
     args = p.parse_args()
@@ -123,7 +137,9 @@ def main() -> None:
                     elif msg.get("cmd") == "predict":
                         try:
                             qpos = np.asarray(msg["qpos"], dtype=np.float64)
-                            actions = policy.predict_prepared(_decode(blobs), qpos, str(msg["task"]))
+                            actions = policy.predict_prepared(
+                                _decode(blobs), qpos, str(msg["task"])
+                            )
                             _send(conn, {"actions": actions.tolist()})
                         except Exception as exc:  # noqa: BLE001 - report to client
                             _send(conn, {"error": repr(exc)})

@@ -31,8 +31,14 @@ from yam_infer.scheduler import ActionScheduler, SafetyFilter
 CONTROL_HZ = 100.0
 
 
-def smooth_move(arms, start: np.ndarray, goal: np.ndarray, phase: str, max_speed: float = 0.5,
-                min_time: float = 2.0) -> None:
+def smooth_move(
+    arms,
+    start: np.ndarray,
+    goal: np.ndarray,
+    phase: str,
+    max_speed: float = 0.5,
+    min_time: float = 2.0,
+) -> None:
     """Cubic smoothstep from start to goal (joints limited to max_speed rad/s peak)."""
     dist = float(np.max(np.abs(goal - start)[np.r_[0:6, 7:13]]))
     duration = max(min_time, 1.5 * dist / max_speed)
@@ -65,14 +71,31 @@ class KeyReader:
 
 def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str:
     """One policy episode. Returns 'next' or 'quit'."""
-    scheduler = ActionScheduler(policy.fps, policy.chunk_size, args.ensemble_m, mode=args.exec_mode,
-                                horizon=args.exec_horizon)
-    safety = SafetyFilter(policy.a_min, policy.a_max, args.margin, args.max_joint_speed,
-                          max_grip_squeeze=args.max_grip_squeeze)
-    recorder = RunRecorder(Path(args.record_dir), args.task, {
-        "ckpt": str(args.ckpt), "episode_index": ep_index, "policy": policy.info(),
-        "settings": {k: v for k, v in vars(args).items() if k != "ckpt"},
-    }, fps=policy.fps)
+    scheduler = ActionScheduler(
+        policy.fps,
+        policy.chunk_size,
+        args.ensemble_m,
+        mode=args.exec_mode,
+        horizon=args.exec_horizon,
+    )
+    safety = SafetyFilter(
+        policy.a_min,
+        policy.a_max,
+        args.margin,
+        args.max_joint_speed,
+        max_grip_squeeze=args.max_grip_squeeze,
+    )
+    recorder = RunRecorder(
+        Path(args.record_dir),
+        args.task,
+        {
+            "ckpt": str(args.ckpt),
+            "episode_index": ep_index,
+            "policy": policy.info(),
+            "settings": {k: v for k, v in vars(args).items() if k != "ckpt"},
+        },
+        fps=policy.fps,
+    )
     stop = threading.Event()
     paused = threading.Event()
     state_lock = threading.Lock()
@@ -94,8 +117,15 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
                     scheduler.add(t_obs, chunk)
                     recorder.log_policy(t_obs, qpos, chunk, latency, images)
                     stats["policy_steps"] += 1
-                    if stats["policy_steps"] % (int(policy.fps * 2) if args.exec_mode == "ensemble" else 3) == 0:
-                        print(f"  policy step {stats['policy_steps']}  latency {latency:.0f} ms", flush=True)
+                    if (
+                        stats["policy_steps"]
+                        % (int(policy.fps * 2) if args.exec_mode == "ensemble" else 3)
+                        == 0
+                    ):
+                        print(
+                            f"  policy step {stats['policy_steps']}  latency {latency:.0f} ms",
+                            flush=True,
+                        )
             except Exception as exc:  # noqa: BLE001
                 shared["error"] = f"policy thread: {exc}"
                 traceback.print_exc()
@@ -155,9 +185,17 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
                 end_reason = "operator next" if k == "r" else "operator quit"
                 break
             # stall detector: right arm has not moved for stall_seconds -> stop (saves the gripper motor)
-            if stall_ref is None or paused.is_set() or np.abs(qpos[7:13] - stall_ref).max() > args.stall_rad:
+            if (
+                stall_ref is None
+                or paused.is_set()
+                or np.abs(qpos[7:13] - stall_ref).max() > args.stall_rad
+            ):
                 stall_ref, stall_t = qpos[7:13].copy(), now
-            elif args.stall_seconds > 0 and not paused.is_set() and now - stall_t > args.stall_seconds:
+            elif (
+                args.stall_seconds > 0
+                and not paused.is_set()
+                and now - stall_t > args.stall_seconds
+            ):
                 end_reason = f"stalled: right arm moved < {args.stall_rad} rad in {args.stall_seconds:.0f}s"
                 break
             if now - t_start > args.max_seconds:
@@ -178,11 +216,19 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     finally:
         stop.set()
         thread.join(timeout=2)
-        out = recorder.close(end_reason=end_reason, duration_s=time.monotonic() - t_start,
-                             policy_steps=stats["policy_steps"], safety_clamped=safety.clamped,
-                             safety_rate_limited=safety.rate_limited, grip_squeeze_limited=safety.squeeze_limited)
+        out = recorder.close(
+            end_reason=end_reason,
+            duration_s=time.monotonic() - t_start,
+            policy_steps=stats["policy_steps"],
+            safety_clamped=safety.clamped,
+            safety_rate_limited=safety.rate_limited,
+            grip_squeeze_limited=safety.squeeze_limited,
+        )
         print(f"  episode ended: {end_reason}\n  recorded -> {out}")
-    if end_reason.startswith(("control loop", "policy thread")) or end_reason in ("ctrl-c", "operator quit"):
+    if end_reason.startswith(("control loop", "policy thread")) or end_reason in (
+        "ctrl-c",
+        "operator quit",
+    ):
         return "quit"
     return "next"
 
@@ -190,12 +236,16 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
 def save_rest_pose(record_dir: Path, rest_pose: np.ndarray) -> None:
     """Used by `yam_infer.tools.stop_all` to bring orphaned arms home."""
     try:
-        (record_dir / "rest_pose.json").write_text(json.dumps(np.asarray(rest_pose).tolist()))
+        (record_dir / "rest_pose.json").write_text(
+            json.dumps(np.asarray(rest_pose).tolist())
+        )
     except OSError as exc:
         print(f"warning: could not save rest pose: {exc}")
 
 
-def park_and_release(arms, start_pose: np.ndarray, rest_pose: np.ndarray | None, park: str) -> None:
+def park_and_release(
+    arms, start_pose: np.ndarray, rest_pose: np.ndarray | None, park: str
+) -> None:
     """Return home, then cut torque.
 
     park="home"  : current -> demo start pose -> REST pose (where the arms were lying when the program
@@ -207,7 +257,9 @@ def park_and_release(arms, start_pose: np.ndarray, rest_pose: np.ndarray | None,
         for attempt in range(2):
             try:
                 if attempt == 1 or arms.session is None:
-                    print("  worker not in control -> reset fault and re-open a session")
+                    print(
+                        "  worker not in control -> reset fault and re-open a session"
+                    )
                     arms.recover()
                 print("returning to the demo start pose ...")
                 smooth_move(arms, arms.get_state(), start_pose, "ACTIVE")
@@ -218,44 +270,115 @@ def park_and_release(arms, start_pose: np.ndarray, rest_pose: np.ndarray | None,
                 break
             except Exception as exc:  # noqa: BLE001
                 print(f"park attempt {attempt + 1} failed: {exc}")
-    print("stopping workers -> motors off" + ("" if park == "home" else "  (!!! arms may drop)"))
+    print(
+        "stopping workers -> motors off"
+        + ("" if park == "home" else "  (!!! arms may drop)")
+    )
     arms.close()
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--task", required=True, choices=["put_banana_in_bowl", "put_blue_block_in_blue_cup"])
-    p.add_argument("--si-root", type=Path, default=Path.home() / "SuperInference-feat-i2rt_NEDF3")
-    p.add_argument("--si-python", type=Path, default=None, help="default: <si-root>/.venv/bin/python")
-    p.add_argument("--teleop-config", type=Path, default=None,
-                   help="default: <si-root>/configs/i2rt_d405_yam_teleop.yaml")
+    p.add_argument(
+        "--task",
+        required=True,
+        choices=["put_banana_in_bowl", "put_blue_block_in_blue_cup"],
+    )
+    p.add_argument(
+        "--si-root", type=Path, default=Path.home() / "SuperInference-feat-i2rt_NEDF3"
+    )
+    p.add_argument(
+        "--si-python",
+        type=Path,
+        default=None,
+        help="default: <si-root>/.venv/bin/python",
+    )
+    p.add_argument(
+        "--teleop-config",
+        type=Path,
+        default=None,
+        help="default: <si-root>/configs/i2rt_d405_yam_teleop.yaml",
+    )
     p.add_argument("--left-serial")
     p.add_argument("--right-serial")
-    p.add_argument("--remote", default="", help="host:port of `python -m yam_infer.server` (GPU elsewhere)")
+    p.add_argument(
+        "--remote",
+        default="",
+        help="host:port of `python -m yam_infer.server` (GPU elsewhere)",
+    )
     p.add_argument("--device", default="auto")
     p.add_argument("--no-jpeg-roundtrip", action="store_true")
-    p.add_argument("--goto-start", choices=["task_mean", "none"], default="task_mean",
-                   help="move to the mean start pose of the demos before each episode")
-    p.add_argument("--park", choices=["home", "start", "none"], default="home",
-                   help="home: back to the rest pose the arms had at program start, then motors off (default)")
-    p.add_argument("--exec-mode", choices=["chunk", "ensemble"], default="chunk",
-                   help="chunk: execute --exec-horizon steps of each prediction, then re-plan (default); "
-                        "ensemble: re-plan every step + ACT temporal ensembling")
-    p.add_argument("--exec-horizon", type=int, default=30, help="chunk mode: steps (at 30 Hz) per prediction")
-    p.add_argument("--ensemble-m", type=float, default=0.01,
-                   help="ensemble mode: >0 older predictions dominate (ACT paper 0.01); <0 newest dominates")
-    p.add_argument("--margin", type=float, default=0.15, help="rad allowed outside the demo range")
-    p.add_argument("--max-joint-speed", type=float, default=1.5, help="rad/s safety limit")
-    p.add_argument("--move-left", dest="freeze_left", action="store_false",
-                   help="let the model move the left arm (default: left arm held still, as in the demos)")
-    p.add_argument("--max-seconds", type=float, default=40.0, help="per episode (demos last 12-25 s)")
-    p.add_argument("--stall-seconds", type=float, default=10.0, help="end episode if the right arm is still; 0=off")
+    p.add_argument(
+        "--goto-start",
+        choices=["task_mean", "none"],
+        default="task_mean",
+        help="move to the mean start pose of the demos before each episode",
+    )
+    p.add_argument(
+        "--park",
+        choices=["home", "start", "none"],
+        default="home",
+        help="home: back to the rest pose the arms had at program start, then motors off (default)",
+    )
+    p.add_argument(
+        "--exec-mode",
+        choices=["chunk", "ensemble"],
+        default="chunk",
+        help="chunk: execute --exec-horizon steps of each prediction, then re-plan (default); "
+        "ensemble: re-plan every step + ACT temporal ensembling",
+    )
+    p.add_argument(
+        "--exec-horizon",
+        type=int,
+        default=30,
+        help="chunk mode: steps (at 30 Hz) per prediction",
+    )
+    p.add_argument(
+        "--ensemble-m",
+        type=float,
+        default=0.01,
+        help="ensemble mode: >0 older predictions dominate (ACT paper 0.01); <0 newest dominates",
+    )
+    p.add_argument(
+        "--margin", type=float, default=0.15, help="rad allowed outside the demo range"
+    )
+    p.add_argument(
+        "--max-joint-speed", type=float, default=1.5, help="rad/s safety limit"
+    )
+    p.add_argument(
+        "--move-left",
+        dest="freeze_left",
+        action="store_false",
+        help="let the model move the left arm (default: left arm held still, as in the demos)",
+    )
+    p.add_argument(
+        "--max-seconds",
+        type=float,
+        default=40.0,
+        help="per episode (demos last 12-25 s)",
+    )
+    p.add_argument(
+        "--stall-seconds",
+        type=float,
+        default=10.0,
+        help="end episode if the right arm is still; 0=off",
+    )
     p.add_argument("--stall-rad", type=float, default=0.08)
-    p.add_argument("--max-grip-squeeze", type=float, default=0.1,
-                   help="gripper target at most this much narrower than measured (protects the gripper motor)")
+    p.add_argument(
+        "--max-grip-squeeze",
+        type=float,
+        default=0.1,
+        help="gripper target at most this much narrower than measured (protects the gripper motor)",
+    )
     p.add_argument("--record-dir", default="runs_infer")
-    p.add_argument("--dry-run", default="", help="episode dir: no hardware, simulated arm + recorded frames")
+    p.add_argument(
+        "--dry-run",
+        default="",
+        help="episode dir: no hardware, simulated arm + recorded frames",
+    )
     args = p.parse_args()
 
     if args.remote:
@@ -265,9 +388,13 @@ def main() -> None:
     else:
         from yam_infer.policy import Policy
 
-        policy = Policy(args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip)
+        policy = Policy(
+            args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip
+        )
     info = policy.info()
-    print(f"policy: tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']} device={info['device']}")
+    print(
+        f"policy: tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']} device={info['device']}"
+    )
     start_pose = np.asarray(info["start_pose"][args.task])
 
     cams = arms = keys = None
@@ -290,12 +417,16 @@ def main() -> None:
             log_dir = Path(args.record_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             arms = FollowerArms(
-                si_root, args.si_python or si_root / ".venv" / "bin" / "python",
-                args.teleop_config or si_root / "configs" / "i2rt_d405_yam_teleop.yaml", log_dir=log_dir,
+                si_root,
+                args.si_python or si_root / ".venv" / "bin" / "python",
+                args.teleop_config or si_root / "configs" / "i2rt_d405_yam_teleop.yaml",
+                log_dir=log_dir,
             )
         cams.wait_ready()
         keys = KeyReader()
-        rest_pose = arms.get_state()  # unpowered resting pose -> where we return before cutting torque
+        rest_pose = (
+            arms.get_state()
+        )  # unpowered resting pose -> where we return before cutting torque
         print("follower state (rest pose):", np.round(rest_pose, 2))
         if not args.dry_run:
             save_rest_pose(Path(args.record_dir), rest_pose)
@@ -308,7 +439,9 @@ def main() -> None:
             smooth_move(arms, cur, start_pose, "ALIGNING")
         arms.activate()
         ep = 0
-        while True:  # between episodes the heartbeat keeps re-sending the last target (no lease timeout)
+        while (
+            True
+        ):  # between episodes the heartbeat keeps re-sending the last target (no lease timeout)
             if run_episode(args, policy, cams, arms, keys, ep) == "quit":
                 break
             ep += 1

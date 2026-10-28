@@ -19,7 +19,9 @@ from typing import Any
 import numpy as np
 
 
-def resolve_serials(si_root: Path, left: str | None, right: str | None) -> dict[str, str]:
+def resolve_serials(
+    si_root: Path, left: str | None, right: str | None
+) -> dict[str, str]:
     left = left or os.environ.get("SI_I2RT_LEFT_RS_SERIAL")
     right = right or os.environ.get("SI_I2RT_RIGHT_RS_SERIAL")
     if not (left and right):
@@ -33,7 +35,9 @@ def resolve_serials(si_root: Path, left: str | None, right: str | None) -> dict[
             left = left or cams.get("left", {}).get("identity")
             right = right or cams.get("right", {}).get("identity")
     if not (left and right):
-        raise RuntimeError("camera serials unknown: pass --left-serial/--right-serial or set SI_I2RT_*_RS_SERIAL")
+        raise RuntimeError(
+            "camera serials unknown: pass --left-serial/--right-serial or set SI_I2RT_*_RS_SERIAL"
+        )
     return {"left_wrist": str(left), "right_wrist": str(right)}
 
 
@@ -54,7 +58,9 @@ class RealSenseCamera:
         self._count = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, daemon=True, name=f"cam-{serial}")
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name=f"cam-{serial}"
+        )
         self._thread.start()
 
     def _loop(self) -> None:
@@ -124,7 +130,9 @@ class ReplayCameraRig:
 
         ep = read_episode(episode_dir)
         self._decode = decode_jpeg_rgb
-        self.frames = {name: ep.cameras[name][1] for name in ("right_wrist", "left_wrist")}
+        self.frames = {
+            name: ep.cameras[name][1] for name in ("right_wrist", "left_wrist")
+        }
         self.n = min(len(v) for v in self.frames.values())
         self.t0 = time.monotonic()
 

@@ -17,7 +17,10 @@ import numpy as np
 
 SIDES = ("left", "right")
 ROLES = ("leader", "follower")
-CAMERAS = {"right_wrist": "nmx/hal/camera/camera_0/rgbd", "left_wrist": "nmx/hal/camera/camera_1/rgbd"}
+CAMERAS = {
+    "right_wrist": "nmx/hal/camera/camera_0/rgbd",
+    "left_wrist": "nmx/hal/camera/camera_1/rgbd",
+}
 
 
 @dataclass
@@ -53,7 +56,9 @@ def read_episode(episode_dir: str | Path, load_images: bool = True) -> RawEpisod
         meta = json.loads((episode_dir / "metadata.json").read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"bad metadata in {episode_dir}: {exc}") from exc
-    ep = RawEpisode(episode_dir, meta.get("task_name", ""), meta.get("task_description", ""))
+    ep = RawEpisode(
+        episode_dir, meta.get("task_name", ""), meta.get("task_description", "")
+    )
 
     joint_buf = {(r, s): ([], []) for r in ROLES for s in SIDES}
     grip_buf = {(r, s): ([], []) for r in ROLES for s in SIDES}
@@ -115,7 +120,9 @@ def interp(ts_src: np.ndarray, values: np.ndarray, ts_query: np.ndarray) -> np.n
     q = (ts_query - ts_src[0]).astype(np.float64)
     if values.ndim == 1:
         return np.interp(q, x, values)
-    return np.stack([np.interp(q, x, values[:, d]) for d in range(values.shape[1])], axis=1)
+    return np.stack(
+        [np.interp(q, x, values[:, d]) for d in range(values.shape[1])], axis=1
+    )
 
 
 def state14(ep: RawEpisode, role: str, ts_query: np.ndarray) -> np.ndarray:
