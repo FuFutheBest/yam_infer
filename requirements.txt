@@ -1,0 +1,10 @@
+# inference on the robot PC (Python 3.10). torch/torchvision come from the CUDA 12.8 index (RTX 50xx needs cu128).
+numpy
+opencv-python-headless
+pyrealsense2
+portal==3.7.3   # must match the SuperInference worker's portal version
+pyyaml
+matplotlib      # only for yampilot.tools.review
+mcap            # only for --dry-run (reads recorded episodes)
+mcap-protobuf-support
+protobuf

@@ -1,0 +1,12 @@
+[project]
+name = "yampilot"
+version = "0.1.0"
+description = "Run ACT imitation-learning policies on I2RT YAM bimanual follower arms"
+requires-python = ">=3.10"
+dependencies = [
+  "torch", "torchvision", "numpy", "opencv-python-headless", "pyrealsense2",
+  "portal==3.7.3", "pyyaml", "matplotlib", "mcap", "mcap-protobuf-support", "protobuf",
+]
+
+[tool.setuptools]
+packages = ["yampilot", "yampilot.model", "yampilot.tools"]
