@@ -1,7 +1,7 @@
 """Optional remote inference, for when the robot PC has no usable GPU.
 
-GPU machine :  python -m yampilot.server --ckpt model.pt --port 5555
-Robot PC    :  python -m yampilot.run ... --remote GPU_HOST:5555
+GPU machine :  python -m yam_infer.server --ckpt model.pt --port 5555
+Robot PC    :  python -m yam_infer.run ... --remote GPU_HOST:5555
 
 Protocol (no pickle): 4-byte header length + JSON header + raw binary blobs listed in the header.
 The robot side does the exact training preprocessing (JPEG round-trip + resize) and
@@ -66,7 +66,7 @@ def _decode(blobs: list[bytes]) -> np.ndarray:
 
 
 class RemotePolicy:
-    """Same interface as yampilot.policy.Policy, but the model runs on a server."""
+    """Same interface as yam_infer.policy.Policy, but the model runs on a server."""
 
     def __init__(self, address: str, jpeg_roundtrip: bool = True, timeout: float = 2.0):
         host, port = address.rsplit(":", 1)
@@ -87,7 +87,7 @@ class RemotePolicy:
         return self._info
 
     def predict(self, frames: dict[str, np.ndarray], qpos: np.ndarray, task: str):
-        from yampilot.policy import preprocess_frame
+        from yam_infer.policy import preprocess_frame
 
         images = np.stack([preprocess_frame(frames[c], self.image_size, self.jpeg_roundtrip) for c in self.cameras])
         _send(self.sock, {"cmd": "predict", "qpos": np.asarray(qpos, float).tolist(), "task": task},
@@ -99,7 +99,7 @@ class RemotePolicy:
 
 
 def main() -> None:
-    from yampilot.policy import Policy
+    from yam_infer.policy import Policy
 
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)

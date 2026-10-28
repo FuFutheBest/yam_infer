@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup on the robot PC. Run from the yampilot directory.
+# One-time setup on the robot PC. Run from the yam_infer directory.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 uv venv .venv --python /usr/bin/python3.10

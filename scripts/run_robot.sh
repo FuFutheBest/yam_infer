@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/run_robot.sh <banana|block> [extra args for yampilot.run]
+# Usage: scripts/run_robot.sh <banana|block> [extra args for yam_infer.run]
 # Stop the data-collection WebUI (start.sh) first: it owns the CAN buses and cameras.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
@@ -27,4 +27,4 @@ if [ -n "$down" ]; then
   (cd "$SI_ROOT" && bash third_party/i2rt/scripts/reset_all_can.sh)
 fi
 export SI_I2RT_YAM_GRIPPER_TYPE=crank_4310
-exec .venv/bin/python -m yampilot.run --ckpt "$CKPT" --task "$TASK" --si-root "$SI_ROOT" "$@"
+exec .venv/bin/python -m yam_infer.run --ckpt "$CKPT" --task "$TASK" --si-root "$SI_ROOT" "$@"

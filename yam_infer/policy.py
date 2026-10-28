@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 import torch
 
-from yampilot.model.act import ACT, ACTConfig
+from yam_infer.model.act import ACT, ACTConfig
 
 
 def preprocess_frame(rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True) -> np.ndarray:

@@ -1,5 +1,5 @@
 [project]
-name = "yampilot"
+name = "yam-inference"
 version = "0.1.0"
 description = "Run ACT imitation-learning policies on I2RT YAM bimanual follower arms"
 requires-python = ">=3.10"
@@ -9,4 +9,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["yampilot", "yampilot.model", "yampilot.tools"]
+packages = ["yam_infer", "yam_infer.model", "yam_infer.tools"]

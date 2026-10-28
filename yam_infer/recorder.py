@@ -5,7 +5,7 @@ runs_infer/<YYYYmmdd_HHMMSS>_<task>/
     policy.npz       per policy step (≈30 Hz): t, qpos(14), chunk(K,14), latency_ms
     command.npz      per command step (100 Hz): t, target_raw(14), target_safe(14), qpos(14)
     frames.mp4       model-input images (right | left side by side) at policy rate
-Review with:  python -m yampilot.tools.review runs_infer/<run>
+Review with:  python -m yam_infer.tools.review runs_infer/<run>
 """
 
 from __future__ import annotations

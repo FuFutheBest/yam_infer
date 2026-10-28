@@ -1,6 +1,6 @@
-"""Review one recorded inference run (see yampilot.recorder).
+"""Review one recorded inference run (see yam_infer.recorder).
 
-    python -m yampilot.tools.review runs_infer/<run> [--video]
+    python -m yam_infer.tools.review runs_infer/<run> [--video]
 
 Writes into the run dir:
     review.png        commanded vs actual joints, policy latency, gripper

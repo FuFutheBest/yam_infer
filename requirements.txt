@@ -4,7 +4,7 @@ opencv-python-headless
 pyrealsense2
 portal==3.7.3   # must match the SuperInference worker's portal version
 pyyaml
-matplotlib      # only for yampilot.tools.review
+matplotlib      # only for yam_infer.tools.review
 mcap            # only for --dry-run (reads recorded episodes)
 mcap-protobuf-support
 protobuf

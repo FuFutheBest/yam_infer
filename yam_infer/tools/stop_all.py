@@ -1,10 +1,10 @@
 """Bring every running I2RT follower worker home, then stop all related processes.
 
-    python -m yampilot.tools.stop_all [--record-dir runs_infer] [--no-home]
+    python -m yam_infer.tools.stop_all [--record-dir runs_infer] [--no-home]
 
 For each follower worker still alive (RPC ports from the teleop config): reset a FAULT, take control,
-move slowly to the rest pose saved by the last yampilot.run (runs_infer/rest_pose.json, else all
-joints 0 / gripper open), then terminate it (motors off).  Finally stops leftover yampilot.run
+move slowly to the rest pose saved by the last yam_infer.run (runs_infer/rest_pose.json, else all
+joints 0 / gripper open), then terminate it (motors off).  Finally stops leftover yam_infer.run
 processes.  A side whose worker is dead is skipped (nothing to move).
 """
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -27,7 +28,10 @@ SIDES = ("left", "right")
 
 
 WORKER = r"python[0-9.]* -m devices\.robots\.i2rt_teleop\.worker"
-INFER = r"python[0-9.]* -m (yampilot\.run|opus\.infer\.run)"
+# only inference processes started from THIS project's venv (another project on the robot also has a
+# "yam_inference" package with its own run/worker modules - never touch those)
+PROJECT_VENV = Path(__file__).resolve().parents[2] / ".venv"
+INFER = re.escape(str(PROJECT_VENV)) + r"/bin/python[0-9.]* -m yam_infer\.run"
 
 
 def _pids(pattern: str) -> list[int]:
@@ -115,7 +119,7 @@ def main() -> None:
     args = p.parse_args()
 
     for pid in _pids(INFER):
-        print(f"stopping yampilot.run pid {pid}")
+        print(f"stopping yam_infer.run pid {pid}")
         os.kill(pid, signal.SIGINT)
     time.sleep(1.0)
 

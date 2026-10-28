@@ -1,10 +1,10 @@
 """Run a trained policy on the I2RT YAM follower arms.
 
-    python -m yampilot.run --ckpt model.pt --task put_blue_block_in_blue_cup \
+    python -m yam_infer.run --ckpt model.pt --task put_blue_block_in_blue_cup \
         --si-root ~/SuperInference-feat-i2rt_NEDF3
 
 Dry run without any hardware (simulated arm + frames from a recorded episode):
-    python -m yampilot.run --ckpt model.pt --task put_banana_in_bowl --dry-run EPISODE_DIR
+    python -m yam_infer.run --ckpt model.pt --task put_banana_in_bowl --dry-run EPISODE_DIR
 
 Keys (type + Enter):  Enter = start / pause-resume   r = new episode   q = park & quit
 Threads:
@@ -25,8 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
-from yampilot.recorder import RunRecorder
-from yampilot.scheduler import ActionScheduler, SafetyFilter
+from yam_infer.recorder import RunRecorder
+from yam_infer.scheduler import ActionScheduler, SafetyFilter
 
 CONTROL_HZ = 100.0
 
@@ -188,7 +188,7 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
 
 
 def save_rest_pose(record_dir: Path, rest_pose: np.ndarray) -> None:
-    """Used by `yampilot.tools.stop_all` to bring orphaned arms home."""
+    """Used by `yam_infer.tools.stop_all` to bring orphaned arms home."""
     try:
         (record_dir / "rest_pose.json").write_text(json.dumps(np.asarray(rest_pose).tolist()))
     except OSError as exc:
@@ -232,7 +232,7 @@ def main() -> None:
                    help="default: <si-root>/configs/i2rt_d405_yam_teleop.yaml")
     p.add_argument("--left-serial")
     p.add_argument("--right-serial")
-    p.add_argument("--remote", default="", help="host:port of `python -m yampilot.server` (GPU elsewhere)")
+    p.add_argument("--remote", default="", help="host:port of `python -m yam_infer.server` (GPU elsewhere)")
     p.add_argument("--device", default="auto")
     p.add_argument("--no-jpeg-roundtrip", action="store_true")
     p.add_argument("--goto-start", choices=["task_mean", "none"], default="task_mean",
@@ -259,11 +259,11 @@ def main() -> None:
     args = p.parse_args()
 
     if args.remote:
-        from yampilot.server import RemotePolicy
+        from yam_infer.server import RemotePolicy
 
         policy = RemotePolicy(args.remote, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     else:
-        from yampilot.policy import Policy
+        from yam_infer.policy import Policy
 
         policy = Policy(args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     info = policy.info()
@@ -274,14 +274,14 @@ def main() -> None:
     rest_pose = None
     try:
         if args.dry_run:
-            from yampilot.cameras import ReplayCameraRig
-            from yampilot.robot import SimArms
+            from yam_infer.cameras import ReplayCameraRig
+            from yam_infer.robot import SimArms
 
             cams = ReplayCameraRig(args.dry_run)
             arms = SimArms(start_pose)
         else:
-            from yampilot.cameras import CameraRig, resolve_serials
-            from yampilot.robot import FollowerArms
+            from yam_infer.cameras import CameraRig, resolve_serials
+            from yam_infer.robot import FollowerArms
 
             si_root = args.si_root.expanduser().resolve()
             serials = resolve_serials(si_root, args.left_serial, args.right_serial)

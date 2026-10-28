@@ -120,7 +120,7 @@ class ReplayCameraRig:
     """Dry-run helper: serves frames from a recorded NEDF3 episode (no hardware)."""
 
     def __init__(self, episode_dir: str):
-        from yampilot.nedf3 import decode_jpeg_rgb, read_episode
+        from yam_infer.nedf3 import decode_jpeg_rgb, read_episode
 
         ep = read_episode(episode_dir)
         self._decode = decode_jpeg_rgb

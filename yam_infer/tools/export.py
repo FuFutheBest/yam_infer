@@ -1,6 +1,6 @@
 """Strip a training checkpoint down to what inference needs (drops optimizer state, ~3x smaller).
 
-    python -m yampilot.tools.export CKPT_IN MODEL_OUT
+    python -m yam_infer.tools.export CKPT_IN MODEL_OUT
 """
 
 from __future__ import annotations
