@@ -114,7 +114,7 @@ stateDiagram-v2
 flowchart LR
     A["读从臂状态 qpos"] --> B["scheduler.target_at(now)"]
     B --> C["左臂 0–6 维<br/>替换为开始时姿态"]
-    C --> D["SafetyFilter<br/>范围 → 挤压 → 速度"]
+    C --> D["SafetyFilter<br/>范围 → 速度"]
     D --> E["arms.submit(…, ACTIVE)"]
     E --> F["recorder 记录"]
     F --> G["检查按键 / 超时"]
@@ -137,7 +137,7 @@ flowchart LR
 | 类 | 作用 |
 |---|---|
 | `ActionScheduler` | 存最近的 chunk（带拍照时刻），`target_at(t)` 线性插值。`chunk` 模式执行 `horizon` 步才换，切换 0.1 s 交叉淡化；`ensemble` 模式加权平均 |
-| `SafetyFilter` | ① 示范范围 ± margin ② 夹爪不比实际窄超过 0.1 ③ 速度上限；统计触发次数 |
+| `SafetyFilter` | ① 关节限制在示范范围 ± margin、夹爪 0–1 ② 速度上限（关节 1.5 rad/s、夹爪 3 /s）；统计触发次数 |
 
 ### `hw/arms.py`：主进程侧的从臂
 

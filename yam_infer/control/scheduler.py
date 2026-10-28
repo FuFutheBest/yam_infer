@@ -121,13 +121,7 @@ class SafetyFilter:
         margin_rad: float = 0.15,
         max_joint_speed: float = 1.5,
         max_gripper_speed: float = 3.0,
-        max_grip_squeeze: float = 0.1,
     ):
-        # gripper target may be at most `max_grip_squeeze` narrower than the measured opening.
-        # Holding an object with a large squeeze for a long time overheated the right gripper motor
-        # (DM4310 "motor over temperature", 2026-10-27). Demos squeeze ~0.19 but only for ~6 s.
-        self.max_grip_squeeze = max_grip_squeeze
-        self.squeeze_limited = 0
         self.lo = np.asarray(a_min, dtype=np.float64).copy()
         self.hi = np.asarray(a_max, dtype=np.float64).copy()
         joints = np.r_[0:6, 7:13]
@@ -144,18 +138,10 @@ class SafetyFilter:
     def reset(self, current: np.ndarray) -> None:
         self.last = np.asarray(current, dtype=np.float64).copy()
 
-    def __call__(
-        self, target: np.ndarray, dt: float, current: np.ndarray | None = None
-    ) -> np.ndarray:
+    def __call__(self, target: np.ndarray, dt: float) -> np.ndarray:
         x = np.clip(target, self.lo, self.hi)
         if not np.allclose(x, target):
             self.clamped += 1
-        if current is not None:
-            for g in (6, 13):
-                floor = current[g] - self.max_grip_squeeze
-                if x[g] < floor:
-                    x[g] = floor
-                    self.squeeze_limited += 1
         if self.last is not None:
             step = self.speed * max(dt, 1e-3)
             y = np.clip(x, self.last - step, self.last + step)

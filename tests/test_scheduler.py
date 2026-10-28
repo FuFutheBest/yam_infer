@@ -37,18 +37,15 @@ def test_chunk_switch_is_cross_faded() -> None:
     np.testing.assert_allclose(_at(s, 1.2), 1.0 + 0.01 * 6, atol=1e-9)
 
 
-def test_safety_filter_range_speed_and_squeeze() -> None:
-    f = SafetyFilter(
-        np.zeros(14), np.ones(14), margin_rad=0.1, max_joint_speed=1.0, max_grip_squeeze=0.1
-    )
+def test_safety_filter_range_and_speed() -> None:
+    f = SafetyFilter(np.zeros(14), np.ones(14), margin_rad=0.1, max_joint_speed=1.0)
     cur = np.full(14, 0.5)
     f.reset(cur)
-    out = f(np.full(14, 5.0), dt=0.01, current=cur)
+    out = f(np.full(14, 5.0), dt=0.01)
     assert np.all(out[np.r_[0:6, 7:13]] <= 0.5 + 0.01 + 1e-9)  # rate limited
     assert f.clamped == 1 and f.rate_limited == 1
     f.reset(cur)
     target = cur.copy()
-    target[13] = 0.0  # squeeze the right gripper hard
-    out = f(target, dt=1.0, current=cur)
-    assert out[13] == 0.4  # at most 0.1 narrower than measured
-    assert f.squeeze_limited == 1
+    target[13] = 0.0  # close the right gripper fully: follows the model (only speed-limited)
+    out = f(target, dt=1.0)
+    assert out[13] == 0.0

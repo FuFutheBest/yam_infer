@@ -93,7 +93,6 @@ flowchart TB
 | `--move-left` | 关 | 允许模型动左臂 |
 | `--run-config` | `configs/run.yaml` | 运行参数文件 |
 | `--max-seconds` | 读 `run.yaml` 的 `episode.max_seconds`（40） | 单回合最长时间；命令行给了就以命令行为准 |
-| `--max-grip-squeeze` | 0.1 | 夹爪挤压上限 |
 | `--record-dir` | `runs_infer` | 记录目录 |
 | `--dry-run <录制目录>` | 关 | 离线演练：录制画面 + 模拟臂 |
 | `--fake-arms` | 关 | 配合 `--dry-run`：模拟臂跑在**真实的 worker 进程**里，走完整 RPC/心跳/看门狗路径 |

@@ -85,7 +85,6 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
         policy.a_max,
         args.margin,
         args.max_joint_speed,
-        max_grip_squeeze=args.max_grip_squeeze,
     )
     recorder = RunRecorder(
         Path(args.record_dir),
@@ -168,7 +167,7 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             if args.freeze_left:
                 target = target.copy()
                 target[0:7] = hold[0:7]
-            safe = safety(target, 1.0 / CONTROL_HZ, qpos)
+            safe = safety(target, 1.0 / CONTROL_HZ)
             arms.submit(safe, "ACTIVE")
             last_target = safe
             recorder.log_command(now, raw, safe, qpos)
@@ -209,7 +208,6 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             policy_steps=stats["policy_steps"],
             safety_clamped=safety.clamped,
             safety_rate_limited=safety.rate_limited,
-            grip_squeeze_limited=safety.squeeze_limited,
         )
         print(f"  episode ended: {end_reason}\n  recorded -> {out}")
     if end_reason.startswith(("control loop", "policy thread")) or end_reason in (
@@ -356,12 +354,6 @@ def main() -> None:
         type=float,
         default=None,
         help="per episode; default: episode.max_seconds of --run-config",
-    )
-    p.add_argument(
-        "--max-grip-squeeze",
-        type=float,
-        default=0.1,
-        help="gripper target at most this much narrower than measured (protects the gripper motor)",
     )
     p.add_argument("--record-dir", default="runs_infer")
     p.add_argument(
