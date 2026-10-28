@@ -1,0 +1,63 @@
+# Hardware config: two YAM follower arms + wrist cameras (robot PC).
+#
+# Read by:
+#   yam_infer.hw.follower.config  strict validator (vendored from SI)
+#   yam_infer.hw.arms, tools.free_hw, tools.home_arms  rpc ports
+#   yam_infer.hw.cameras  camera serials
+# Schema = SuperInference configs/i2rt_d405_yam_teleop.yaml @0dbfa5d.
+# `leader` entries are unused for inference, but the validator
+# requires them (all ports / CAN channels must be unique).
+# CAN names are fixed by /etc/udev/rules.d/90-can.rules.
+
+version: 1
+episode_signal_pattern: /tmp/superinference_episode_{signal}
+
+control:
+  frequency_hz: 100.0
+  alignment_duration_s: 3.0
+  alignment_max_velocity_rad_s: 0.7
+  alignment_settle_timeout_s: 3.0
+  alignment_tolerance: 0.18
+  alignment_stable_samples: 3
+  startup_timeout_s: 10.0
+  rpc_timeout_s: 2.0
+  cycle_rpc_timeout_s: 0.10
+  command_frame_max_age_s: 0.05
+  command_lease_timeout_s: 0.15
+  feedback_timeout_s: 0.10
+  watchdog_check_interval_s: 0.005
+  following_error_fault_threshold: 1.0
+  following_error_fault_samples: 3
+  enter_chord_window_s: 0.30
+  button_debounce_samples: 3
+  bilateral_kp: 0.0
+  bilateral_kd: 0.0
+  leader_feedback: true
+
+arms:
+  left:
+    leader:
+      can_channel: can1
+      rpc_port: 1236
+    follower:
+      can_channel: can3
+      rpc_port: 1234
+      gripper: &yam_gripper
+        backend: i2rt_can
+        type: crank_4310
+
+  right:
+    leader:
+      can_channel: can0
+      rpc_port: 1237
+    follower:
+      can_channel: can2
+      rpc_port: 1235
+      joint_directions: [1, 1, 1, 1, 1, 1, 1]
+      gripper: *yam_gripper
+
+# RealSense D405 serials (rs-enumerate-devices -s). Overridden by
+# --left-serial/--right-serial or YAM_LEFT_CAM_SERIAL/YAM_RIGHT_CAM_SERIAL.
+cameras:
+  left_wrist: "262622275249"
+  right_wrist: "262622272890"

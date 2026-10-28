@@ -1,0 +1,7 @@
+# Inference run settings, read by yam_infer.run (--run-config).
+# A value given on the command line overrides the one here.
+
+episode:
+  # an episode ends ("max_seconds") after this many seconds of
+  # policy control; the demos last 12-25 s
+  max_seconds: 40.0

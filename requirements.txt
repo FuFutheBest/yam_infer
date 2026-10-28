@@ -1,10 +1,24 @@
-# inference on the robot PC (Python 3.10). torch/torchvision come from the CUDA 12.8 index (RTX 50xx needs cu128).
-numpy
-opencv-python-headless
-pyrealsense2
-portal==3.7.3   # must match the SuperInference worker's portal version
-pyyaml
-matplotlib      # only for yam_infer.tools.review
-mcap            # only for --dry-run (reads recorded episodes)
-mcap-protobuf-support
+# Robot PC (Python 3.10). torch/torchvision come from the CUDA 12.8 index (RTX 50xx), see
+# scripts/setup_robot.sh. Versions pinned to what ran successfully on the robot (2026-10).
+
+# --- inference
+numpy==2.2.6            # i2rt pins numpy 2.2.6
+opencv-python-headless==5.0.0.93
+pyrealsense2==2.59.1.11053
+portal==3.7.3           # RPC between main process and follower workers
+pyyaml==6.0.3
+matplotlib              # only for yam_infer.tools.review
+mcap==1.6.0             # only for --dry-run (reads recorded episodes)
+mcap-protobuf-support==0.6.0
 protobuf
+
+# --- follower worker + vendored i2rt SDK (third_party/i2rt), runtime imports only
+python-can==4.5.0
+msgpack==1.1.2          # python-can needs ~=1.1.0
+crcmod-plus==2.3.6
+dm-env==1.6
+mcap-ros2-support==0.6.0
+mujoco==3.16.0          # gravity compensation model
+pydantic==2.14.1
+tyro==1.0.16
+packaging

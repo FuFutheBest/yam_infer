@@ -1,10 +1,10 @@
 """Run a trained policy on the I2RT YAM follower arms.
 
-    python -m yam_infer.run --ckpt model.pt --task put_blue_block_in_blue_cup \
-        --si-root ~/SuperInference-feat-i2rt_NEDF3
+    python -m yam_infer.run --ckpt model.pt --task put_blue_block_in_blue_cup
 
 Dry run without any hardware (simulated arm + frames from a recorded episode):
     python -m yam_infer.run --ckpt model.pt --task put_banana_in_bowl --dry-run EPISODE_DIR
+    ... --dry-run EPISODE_DIR --fake-arms   # same, but through the real worker processes + RPC
 
 Keys (type + Enter):  Enter = start / pause-resume   r = new episode   q = park & quit
 Threads:
@@ -15,8 +15,8 @@ Threads:
 from __future__ import annotations
 
 import argparse
-import json
 import queue
+import signal
 import sys
 import threading
 import time
@@ -25,10 +25,12 @@ from pathlib import Path
 
 import numpy as np
 
-from yam_infer.recorder import RunRecorder
-from yam_infer.scheduler import ActionScheduler, SafetyFilter
+from yam_infer.control.scheduler import ActionScheduler, SafetyFilter
+from yam_infer.data.recorder import RunRecorder
+from yam_infer.hw.arms import DEFAULT_HW_CONFIG, FollowerArms
 
 CONTROL_HZ = 100.0
+DEFAULT_RUN_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "run.yaml"
 
 
 def smooth_move(
@@ -147,7 +149,6 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             break
 
     hold = arms.get_state()
-    stall_ref, stall_t = None, time.monotonic()
     safety.reset(hold)
     thread = threading.Thread(target=policy_loop, daemon=True)
     thread.start()
@@ -184,20 +185,6 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             elif k in ("r", "q"):
                 end_reason = "operator next" if k == "r" else "operator quit"
                 break
-            # stall detector: right arm has not moved for stall_seconds -> stop (saves the gripper motor)
-            if (
-                stall_ref is None
-                or paused.is_set()
-                or np.abs(qpos[7:13] - stall_ref).max() > args.stall_rad
-            ):
-                stall_ref, stall_t = qpos[7:13].copy(), now
-            elif (
-                args.stall_seconds > 0
-                and not paused.is_set()
-                and now - stall_t > args.stall_seconds
-            ):
-                end_reason = f"stalled: right arm moved < {args.stall_rad} rad in {args.stall_seconds:.0f}s"
-                break
             if now - t_start > args.max_seconds:
                 end_reason = "max_seconds"
                 break
@@ -233,19 +220,7 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     return "next"
 
 
-def save_rest_pose(record_dir: Path, rest_pose: np.ndarray) -> None:
-    """Used by `yam_infer.tools.stop_all` to bring orphaned arms home."""
-    try:
-        (record_dir / "rest_pose.json").write_text(
-            json.dumps(np.asarray(rest_pose).tolist())
-        )
-    except OSError as exc:
-        print(f"warning: could not save rest pose: {exc}")
-
-
-def park_and_release(
-    arms, start_pose: np.ndarray, rest_pose: np.ndarray | None, park: str
-) -> None:
+def park_and_release(arms, start_pose: np.ndarray, rest_pose: np.ndarray | None, park: str) -> None:
     """Return home, then cut torque.
 
     park="home"  : current -> demo start pose -> REST pose (where the arms were lying when the program
@@ -257,9 +232,7 @@ def park_and_release(
         for attempt in range(2):
             try:
                 if attempt == 1 or arms.session is None:
-                    print(
-                        "  worker not in control -> reset fault and re-open a session"
-                    )
+                    print("  worker not in control -> reset fault and re-open a session")
                     arms.recover()
                 print("returning to the demo start pose ...")
                 smooth_move(arms, arms.get_state(), start_pose, "ACTIVE")
@@ -270,14 +243,45 @@ def park_and_release(
                 break
             except Exception as exc:  # noqa: BLE001
                 print(f"park attempt {attempt + 1} failed: {exc}")
-    print(
-        "stopping workers -> motors off"
-        + ("" if park == "home" else "  (!!! arms may drop)")
-    )
+    print("stopping workers -> motors off" + ("" if park == "home" else "  (!!! arms may drop)"))
     arms.close()
 
 
+def install_stop_signals() -> None:
+    """SIGINT (Ctrl+C) and SIGTERM -> KeyboardInterrupt once -> the normal park-and-exit path.
+
+    Installed explicitly: a process started in the background by a non-interactive shell
+    inherits SIGINT=ignored and would otherwise never stop.  Repeated signals while parking
+    are ignored so the slow move home is not cut short (that would drop the arms).
+    """
+    count = [0]
+
+    def handler(signum: int, _frame) -> None:
+        count[0] += 1
+        if count[0] == 1:
+            raise KeyboardInterrupt
+        print(f"  ({signal.Signals(signum).name} ignored: already stopping, parking the arms)")
+
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
+
+
+def load_max_seconds(run_config: Path) -> float:
+    """episode.max_seconds from the run config (a positive number)."""
+    import yaml
+
+    try:
+        cfg = yaml.safe_load(Path(run_config).read_text()) or {}
+        value = float(cfg["episode"]["max_seconds"])
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"cannot read episode.max_seconds from {run_config}: {exc}") from exc
+    if not value > 0:
+        raise ValueError(f"{run_config}: episode.max_seconds must be > 0, got {value}")
+    return value
+
+
 def main() -> None:
+    install_stop_signals()
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -288,26 +292,17 @@ def main() -> None:
         choices=["put_banana_in_bowl", "put_blue_block_in_blue_cup"],
     )
     p.add_argument(
-        "--si-root", type=Path, default=Path.home() / "SuperInference-feat-i2rt_NEDF3"
-    )
-    p.add_argument(
-        "--si-python",
+        "--hw-config",
         type=Path,
-        default=None,
-        help="default: <si-root>/.venv/bin/python",
+        default=DEFAULT_HW_CONFIG,
+        help="arms (CAN, RPC ports, watchdog) + camera serials",
     )
-    p.add_argument(
-        "--teleop-config",
-        type=Path,
-        default=None,
-        help="default: <si-root>/configs/i2rt_d405_yam_teleop.yaml",
-    )
-    p.add_argument("--left-serial")
-    p.add_argument("--right-serial")
+    p.add_argument("--left-serial", help="override cameras.left_wrist of the hw config")
+    p.add_argument("--right-serial", help="override cameras.right_wrist of the hw config")
     p.add_argument(
         "--remote",
         default="",
-        help="host:port of `python -m yam_infer.server` (GPU elsewhere)",
+        help="host:port of `python -m yam_infer.policy.server` (GPU elsewhere)",
     )
     p.add_argument("--device", default="auto")
     p.add_argument("--no-jpeg-roundtrip", action="store_true")
@@ -342,12 +337,8 @@ def main() -> None:
         default=0.01,
         help="ensemble mode: >0 older predictions dominate (ACT paper 0.01); <0 newest dominates",
     )
-    p.add_argument(
-        "--margin", type=float, default=0.15, help="rad allowed outside the demo range"
-    )
-    p.add_argument(
-        "--max-joint-speed", type=float, default=1.5, help="rad/s safety limit"
-    )
+    p.add_argument("--margin", type=float, default=0.15, help="rad allowed outside the demo range")
+    p.add_argument("--max-joint-speed", type=float, default=1.5, help="rad/s safety limit")
     p.add_argument(
         "--move-left",
         dest="freeze_left",
@@ -355,18 +346,17 @@ def main() -> None:
         help="let the model move the left arm (default: left arm held still, as in the demos)",
     )
     p.add_argument(
-        "--max-seconds",
-        type=float,
-        default=40.0,
-        help="per episode (demos last 12-25 s)",
+        "--run-config",
+        type=Path,
+        default=DEFAULT_RUN_CONFIG,
+        help="run settings (episode.max_seconds, ...)",
     )
     p.add_argument(
-        "--stall-seconds",
+        "--max-seconds",
         type=float,
-        default=10.0,
-        help="end episode if the right arm is still; 0=off",
+        default=None,
+        help="per episode; default: episode.max_seconds of --run-config",
     )
-    p.add_argument("--stall-rad", type=float, default=0.08)
     p.add_argument(
         "--max-grip-squeeze",
         type=float,
@@ -379,18 +369,29 @@ def main() -> None:
         default="",
         help="episode dir: no hardware, simulated arm + recorded frames",
     )
+    p.add_argument(
+        "--fake-arms",
+        action="store_true",
+        help="with --dry-run: simulate the arms inside the real worker processes (tests RPC path)",
+    )
     args = p.parse_args()
+    if args.fake_arms and not args.dry_run:
+        p.error("--fake-arms needs --dry-run (no fake arms next to real cameras)")
+    if args.max_seconds is None:
+        try:
+            args.max_seconds = load_max_seconds(args.run_config)
+        except ValueError as exc:
+            p.error(str(exc))
+    print(f"episode limit: {args.max_seconds:.0f} s")
 
     if args.remote:
-        from yam_infer.server import RemotePolicy
+        from yam_infer.policy.server import RemotePolicy
 
         policy = RemotePolicy(args.remote, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     else:
-        from yam_infer.policy import Policy
+        from yam_infer.policy.policy import Policy
 
-        policy = Policy(
-            args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip
-        )
+        policy = Policy(args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     info = policy.info()
     print(
         f"policy: tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']} device={info['device']}"
@@ -401,35 +402,31 @@ def main() -> None:
     rest_pose = None
     try:
         if args.dry_run:
-            from yam_infer.cameras import ReplayCameraRig
-            from yam_infer.robot import SimArms
+            from yam_infer.hw.arms import SimArms
+            from yam_infer.hw.cameras import ReplayCameraRig
 
             cams = ReplayCameraRig(args.dry_run)
-            arms = SimArms(start_pose)
+            if args.fake_arms:
+                log_dir = Path(args.record_dir)
+                log_dir.mkdir(parents=True, exist_ok=True)
+                arms = FollowerArms(args.hw_config, log_dir=log_dir, fake=True)
+            else:
+                arms = SimArms(start_pose)
         else:
-            from yam_infer.cameras import CameraRig, resolve_serials
-            from yam_infer.robot import FollowerArms
+            from yam_infer.hw.cameras import CameraRig, resolve_serials
 
-            si_root = args.si_root.expanduser().resolve()
-            serials = resolve_serials(si_root, args.left_serial, args.right_serial)
+            serials = resolve_serials(args.hw_config, args.left_serial, args.right_serial)
             print(f"cameras: {serials}")
             cams = CameraRig(serials)
             log_dir = Path(args.record_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
-            arms = FollowerArms(
-                si_root,
-                args.si_python or si_root / ".venv" / "bin" / "python",
-                args.teleop_config or si_root / "configs" / "i2rt_d405_yam_teleop.yaml",
-                log_dir=log_dir,
-            )
+            arms = FollowerArms(args.hw_config, log_dir=log_dir)
         cams.wait_ready()
         keys = KeyReader()
         rest_pose = (
             arms.get_state()
         )  # unpowered resting pose -> where we return before cutting torque
         print("follower state (rest pose):", np.round(rest_pose, 2))
-        if not args.dry_run:
-            save_rest_pose(Path(args.record_dir), rest_pose)
 
         arms.begin()  # ALIGNING phase
         cur = arms.get_state()

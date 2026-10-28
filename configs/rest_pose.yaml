@@ -1,0 +1,8 @@
+# Rest pose of the two follower arms: where they lie when
+# unpowered, so torque can be cut there safely.
+# Target of scripts/home_arms.sh (--target rest).
+# Per arm: 6 joints [rad] + gripper [0 closed .. 1 open].
+# Source: robot PC ~/fufu/opus_inference_train/runs_infer/rest_pose.json
+#   (follower state at the start of the 2026-10-28 19:11 run).
+left: [-0.0620, 0.0032, 0.1963, -0.8478, -0.1722, -0.3477, 0.9996]
+right: [-0.0643, 0.0006, 0.1776, -0.8162, -0.0563, 0.8135, 0.9855]

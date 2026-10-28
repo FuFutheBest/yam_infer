@@ -1,4 +1,4 @@
-"""Review one recorded inference run (see yam_infer.recorder).
+"""Review one recorded inference run (see yam_infer.data.recorder).
 
     python -m yam_infer.tools.review runs_infer/<run> [--video]
 
@@ -16,9 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-NAMES = (
-    [f"L{i}" for i in range(6)] + ["L grip"] + [f"R{i}" for i in range(6)] + ["R grip"]
-)
+NAMES = [f"L{i}" for i in range(6)] + ["L grip"] + [f"R{i}" for i in range(6)] + ["R grip"]
 
 
 def main() -> None:
@@ -72,9 +70,7 @@ def main() -> None:
     fig, axes = plt.subplots(3, 6, figsize=(24, 10), sharex=True)
     for j, ax in enumerate(axes.flat[:14]):
         ax.plot(tc, cmd["target_raw"][:, j], "r-", lw=0.8, label="model target")
-        ax.plot(
-            tc, cmd["target_safe"][:, j], "g--", lw=0.8, label="sent (after safety)"
-        )
+        ax.plot(tc, cmd["target_safe"][:, j], "g--", lw=0.8, label="sent (after safety)")
         ax.plot(tc, cmd["qpos"][:, j], "b-", lw=0.8, label="follower actual")
         ax.set_title(NAMES[j])
         ax.grid(alpha=0.3)
@@ -103,13 +99,9 @@ def main() -> None:
             h, w = frame.shape[:2]
             panel = np.full((120, w, 3), 255, np.uint8)
             chunk = pol["chunk"][i]
-            for k in range(
-                len(chunk) - 1
-            ):  # predicted right gripper (0 closed..1 open)
+            for k in range(len(chunk) - 1):  # predicted right gripper (0 closed..1 open)
                 x0, x1 = int(k * w / len(chunk)), int((k + 1) * w / len(chunk))
-                y0, y1 = int(110 - 100 * chunk[k, 13]), int(
-                    110 - 100 * chunk[k + 1, 13]
-                )
+                y0, y1 = int(110 - 100 * chunk[k, 13]), int(110 - 100 * chunk[k + 1, 13])
                 cv2.line(panel, (x0, y0), (x1, y1), (0, 0, 255), 2)
             cv2.putText(
                 panel,

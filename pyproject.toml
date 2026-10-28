@@ -1,12 +1,37 @@
 [project]
 name = "yam-inference"
-version = "0.1.0"
-description = "Run ACT imitation-learning policies on I2RT YAM bimanual follower arms"
+version = "0.2.0"
+description = "Run ACT imitation-learning policies on I2RT YAM bimanual follower arms (self-contained)"
 requires-python = ">=3.10"
+# Exact robot pins live in requirements.txt (torch comes from the CUDA 12.8 index, see scripts/setup_robot.sh).
 dependencies = [
   "torch", "torchvision", "numpy", "opencv-python-headless", "pyrealsense2",
   "portal==3.7.3", "pyyaml", "matplotlib", "mcap", "mcap-protobuf-support", "protobuf",
+  # follower worker + vendored i2rt SDK (third_party/i2rt, put on PYTHONPATH by the worker launcher)
+  "python-can==4.5.0", "msgpack~=1.1.0", "crcmod-plus", "dm-env==1.6", "mcap-ros2-support",
+  "mujoco", "pydantic>=2", "tyro", "packaging",
 ]
 
-[tool.setuptools]
-packages = ["yam_infer", "yam_infer.model", "yam_infer.tools"]
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["yam_infer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "third_party/i2rt"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["third_party"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# kept byte-identical to SuperInference (see VENDORED.md)
+"yam_infer/hw/follower/runtime.py" = ["I"]
+"yam_infer/hw/follower/config.py" = ["I"]
+
+# type checking: see pyrightconfig.json (adds third_party/i2rt to the import path)

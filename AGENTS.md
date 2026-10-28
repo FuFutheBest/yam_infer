@@ -20,3 +20,13 @@
 - 文档风格：mermaid 图 + 表格优先，避免大段 README 式文字。
 - 训练后网络可能还要调整，后续在同一会话继续迭代；保持代码、配置、日志可复现。
 - 不修改源项目 `SuperInference-feat-i2rt_NEDF3` 中的文件（只读引用其代码与数据）。
+
+## 当前状态
+
+| 项 | 值 |
+|---|---|
+| 独立性 | 自包含：从臂 worker + i2rt SDK 已搬入（`yam_infer/hw/follower/`、`third_party/i2rt/`，清单见 `VENDORED.md`），运行时不再需要 SI |
+| 机器人部署 | `team1@10.128.1.165:~/fufu/yam_infer`（`check_env` ALL OK、15 测试通过、GPU 离线演练通过）；**独立版真机待测** |
+| 旧部署 | `~/fufu/opus_inference_train`（依赖 SI worker，真机已跑成功），保留作回退 |
+| 开发流程 | 见 `docs/06_development.md` |
+| 约束 | 不能与采集 WebUI 同时运行（争用 CAN/相机/端口 1234–1235）；真机测试须有人在旁 |
