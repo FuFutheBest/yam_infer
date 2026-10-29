@@ -25,13 +25,19 @@ from pathlib import Path
 
 import numpy as np
 
+from yam_infer.config import (
+    DEFAULT_MODELS_CONFIG,
+    DEFAULT_RUN_CONFIG,
+    check_model_matches,
+    load_model_config,
+    load_run_config,
+)
 from yam_infer.control.scheduler import ActionScheduler, SafetyFilter
 from yam_infer.control.state_history import StateHistory
 from yam_infer.data.recorder import RunRecorder
 from yam_infer.hw.arms import DEFAULT_HW_CONFIG, FollowerArms
 
 CONTROL_HZ = 100.0
-DEFAULT_RUN_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "run.yaml"
 
 
 def smooth_move(
@@ -97,6 +103,10 @@ def run_episode(
     # follower states of the last ~1 s (written by the control loop) -> the joints are taken AT the
     # image time, as in training (see control/state_history.py)
     history = StateHistory(seconds=1.0, rate_hz=CONTROL_HZ)
+    # models.yaml compensate_action_shift: chunk step k is placed at t_img + (k - shift) / fps
+    t_shift = (
+        policy.action_shift / policy.fps if getattr(args, "compensate_action_shift", False) else 0.0
+    )
 
     def policy_loop(recorder: RunRecorder):
         period = 1.0 / policy.fps
@@ -113,7 +123,7 @@ def run_episode(
                     latency = (t_done - t_infer) * 1000
                     # the chunk starts at the observation time (training: actions a(t)...a(t+49)
                     # for the sample at t), so image age + inference latency are skipped over
-                    scheduler.add(t_img, chunk)
+                    scheduler.add(t_img - t_shift, chunk)
                     recorder.log_policy(
                         t_img,
                         qpos,
@@ -310,8 +320,12 @@ def build_run_meta(args) -> dict:
         meta["ckpt_sha256"] = f"unavailable: {exc}"
     root = Path(__file__).resolve().parents[1]
     try:
-        out = subprocess.run(["git", "-C", str(root), "describe", "--always", "--dirty"],
-                             capture_output=True, text=True, timeout=5)
+        out = subprocess.run(
+            ["git", "-C", str(root), "describe", "--always", "--dirty"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         meta["code_version"] = out.stdout.strip() or "unknown (no git checkout)"
     except (OSError, subprocess.TimeoutExpired):
         meta["code_version"] = "unknown"
@@ -325,64 +339,19 @@ def build_run_meta(args) -> dict:
     return meta
 
 
-RUN_CONFIG_SCHEMA = {  # section -> key -> (type, check, description of the valid range)
-    "execution": {
-        "mode": (str, lambda v: v in ("chunk", "ensemble"), "chunk or ensemble"),
-        "horizon": (int, lambda v: 1 <= v <= 50, "1..50 steps"),
-        "blend_s": (float, lambda v: 0 <= v <= 2, "0..2 s"),
-        "ensemble_m": (float, lambda v: -5 <= v <= 5, "-5..5"),
-    },
-    "episode": {
-        "max_seconds": (float, lambda v: v > 0, "> 0 s"),
-    },
-}
-
-
-def load_run_config(run_config: Path) -> dict[str, dict]:
-    """configs/run.yaml -> {section: {key: value}}; every key required, unknown keys rejected."""
-    import yaml
-
-    try:
-        cfg = yaml.safe_load(Path(run_config).read_text()) or {}
-    except (OSError, yaml.YAMLError) as exc:
-        raise ValueError(f"cannot read {run_config}: {exc}") from exc
-    if not isinstance(cfg, dict):
-        raise ValueError(f"{run_config}: top level must be a mapping")
-    unknown = sorted(set(cfg) - set(RUN_CONFIG_SCHEMA))
-    if unknown:
-        raise ValueError(f"{run_config}: unknown section(s) {unknown}")
-    out: dict[str, dict] = {}
-    for section, keys in RUN_CONFIG_SCHEMA.items():
-        raw = cfg.get(section)
-        if not isinstance(raw, dict):
-            raise ValueError(f"{run_config}: missing section '{section}'")
-        extra = sorted(set(raw) - set(keys))
-        if extra:
-            raise ValueError(f"{run_config}: unknown key(s) {section}.{extra}")
-        out[section] = {}
-        for key, (typ, ok, rng) in keys.items():
-            if key not in raw:
-                raise ValueError(f"{run_config}: missing {section}.{key}")
-            value = raw[key]
-            if typ is float and isinstance(value, int) and not isinstance(value, bool):
-                value = float(value)
-            if not isinstance(value, typ) or isinstance(value, bool) or not ok(value):
-                raise ValueError(f"{run_config}: {section}.{key} = {raw[key]!r}, expected {rng}")
-            out[section][key] = value
-    return out
-
-
 def main() -> None:
     install_stop_signals()
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--ckpt", required=True)
     p.add_argument(
-        "--task",
-        required=True,
-        choices=["put_banana_in_bowl", "put_blue_block_in_blue_cup"],
+        "--models-config",
+        type=Path,
+        default=DEFAULT_MODELS_CONFIG,
+        help="the model to run and how to read it (ckpt, format, task, action_mode)",
     )
+    p.add_argument("--ckpt", default=None, help="one-off: other model file than models.yaml")
+    p.add_argument("--task", default=None, help="one-off: other task than models.yaml")
     p.add_argument(
         "--hw-config",
         type=Path,
@@ -471,24 +440,34 @@ def main() -> None:
         p.error("--fake-arms needs --dry-run (no fake arms next to real cameras)")
     try:
         run_cfg = load_run_config(args.run_config)
+        model_cfg = load_model_config(args.models_config)
     except ValueError as exc:
         p.error(str(exc))
-    ex = run_cfg["execution"]
-    for arg, key in (("exec_mode", "mode"), ("exec_horizon", "horizon"), ("ensemble_m", "ensemble_m")):
+    if args.ckpt is not None or args.task is not None:
+        from dataclasses import replace
+
+        model_cfg = replace(
+            model_cfg,
+            ckpt=Path(args.ckpt) if args.ckpt is not None else model_cfg.ckpt,
+            task=args.task if args.task is not None else model_cfg.task,
+        )
+    args.task, args.ckpt = model_cfg.task, str(model_cfg.ckpt)
+    if not args.remote and not Path(args.ckpt).is_file():
+        p.error(f"model file not found: {args.ckpt} ({args.models_config})")
+    ex = run_cfg["execution"]  # command line > run.yaml
+    for arg, key in (
+        ("exec_mode", "mode"),
+        ("exec_horizon", "horizon"),
+        ("ensemble_m", "ensemble_m"),
+    ):
         if getattr(args, arg) is None:
             setattr(args, arg, ex[key])
     if args.blend_s is None:
         args.blend_s = ex["blend_s"]
     if args.max_seconds is None:
         args.max_seconds = run_cfg["episode"]["max_seconds"]
-    if not 1 <= args.exec_horizon <= 50:
-        p.error(f"--exec-horizon must be 1..50, got {args.exec_horizon}")
-    if args.exec_mode == "chunk":  # only the parameters that apply to the mode
-        used = (f"horizon={args.exec_horizon} steps (new plan every {args.exec_horizon / 30:.2f} s)"
-                f", blend={args.blend_s} s  [ensemble_m unused]")
-    else:
-        used = f"ensemble_m={args.ensemble_m} (new plan every frame)  [horizon, blend unused]"
-    print(f"execution: {args.exec_mode}: {used}  episode limit: {args.max_seconds:.0f} s")
+    args.compensate_action_shift = model_cfg.compensate_action_shift
+    print(f"task: {args.task}  model: {args.ckpt}")
 
     if args.remote:
         from yam_infer.policy.server import RemotePolicy
@@ -499,10 +478,35 @@ def main() -> None:
 
         policy = Policy(args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     info = policy.info()
+    try:
+        check_model_matches(model_cfg, policy.format, policy.tasks, policy.action_mode)
+    except ValueError as exc:
+        p.error(str(exc))
+    if not 1 <= args.exec_horizon <= policy.chunk_size:
+        p.error(
+            f"--exec-horizon must be 1..{policy.chunk_size} (model chunk), got {args.exec_horizon}"
+        )
     run_meta = build_run_meta(args)
     print(
-        f"policy: tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']} device={info['device']}"
+        f"policy: {info['format']} tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']}"
+        f" image={info['image_size']} action={info['action_mode']} shift={info['action_shift']}"
+        f" device={info['device']}"
     )
+    fps = policy.fps
+    if args.exec_mode == "chunk":  # only the parameters that apply to the mode
+        used = (
+            f"horizon={args.exec_horizon} steps (new plan every {args.exec_horizon / fps:.2f} s)"
+            f", blend={args.blend_s} s  [ensemble_m unused]"
+        )
+    else:
+        used = f"ensemble_m={args.ensemble_m} (new plan every frame)  [horizon, blend unused]"
+    shift = (
+        f"  action_shift compensated: chunk starts {policy.action_shift / fps * 1000:.0f} ms"
+        " before the observation"
+        if args.compensate_action_shift and policy.action_shift
+        else ""
+    )
+    print(f"execution: {args.exec_mode}: {used}  episode limit: {args.max_seconds:.0f} s{shift}")
     start_pose = np.asarray(info["start_pose"][args.task])
 
     cams = arms = keys = None

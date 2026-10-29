@@ -53,10 +53,16 @@ def _hw_config() -> str:
 
 
 def _models() -> str:
-    found = sorted(p.name for p in (ROOT / "models").glob("*.pt"))
-    if not found:
-        raise FileNotFoundError("no models/*.pt (copy them from the user PC)")
-    return ", ".join(found)
+    """configs/models.yaml: the model file exists and is what the config says it is."""
+    from yam_infer.config import check_model_matches, load_model_config
+    from yam_infer.policy.policy import Policy
+
+    m = load_model_config()
+    if not m.ckpt.is_file():
+        raise FileNotFoundError(f"{m.ckpt} missing (copy it from the user PC)")
+    pol = Policy(m.ckpt, "cpu")
+    check_model_matches(m, pol.format, pol.tasks, pol.action_mode)
+    return f"{m.ckpt.name}: {m.format}, task {m.task}, {m.action_mode}, chunk {pol.chunk_size}"
 
 
 print(f"python {sys.version.split()[0]} ({sys.executable})")

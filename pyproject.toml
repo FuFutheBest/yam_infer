@@ -24,7 +24,7 @@ pythonpath = [".", "third_party/i2rt"]
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["third_party"]
+extend-exclude = ["third_party", "yam_infer/policy/detr"]
 
 [tool.ruff.lint]
 select = ["E9", "F", "I"]

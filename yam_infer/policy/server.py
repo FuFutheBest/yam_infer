@@ -88,6 +88,10 @@ class RemotePolicy:
         self.image_size = tuple(self._info["image_size"])
         self.fps = float(self._info["fps"])
         self.chunk_size = int(self._info["chunk_size"])
+        self.tasks = list(self._info["tasks"])
+        self.action_shift = int(self._info.get("action_shift", 0))
+        self.format = str(self._info.get("format", "act_v2"))
+        self.action_mode = str(self._info.get("action_mode", "abs"))
         self.a_min = np.asarray(self._info["action_min"])
         self.a_max = np.asarray(self._info["action_max"])
 

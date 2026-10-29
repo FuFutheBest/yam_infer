@@ -1,6 +1,14 @@
 {
   "venvPath": ".",
   "venv": ".venv",
-  "extraPaths": ["third_party/i2rt"],
-  "exclude": ["third_party", ".venv", "runs_infer*", "models"]
+  "extraPaths": [
+    "third_party/i2rt"
+  ],
+  "exclude": [
+    "third_party",
+    ".venv",
+    "runs_infer*",
+    "models",
+    "yam_infer/policy/detr"
+  ]
 }

@@ -16,6 +16,7 @@ yam_infer/
 ├── robot.env.example       机器人本机配置模板（复制为 robot.env，不进 git）
 ├── configs/
 │   ├── hardware.yaml         两只从臂（CAN 口、RPC 端口、看门狗参数）+ 相机序列号
+│   ├── models.yaml           本次运行的那一个模型 + 怎么解读它（格式、任务、增量/绝对）
 │   ├── rest_pose.yaml        休息姿态（home_arms 的归位目标）
 │   └── run.yaml              运行参数（执行方式 execution.*、回合时长 episode.max_seconds）
 ├── docs/                   本文档
@@ -26,8 +27,10 @@ yam_infer/
 └── yam_infer/              Python 包
     ├── run.py                主程序（入口）
     ├── policy/               「大脑」：网络
-    │   ├── policy.py           模型加载 + 预处理 + 推理
-    │   ├── act.py              ACT 网络结构（与训练端一致）
+    │   ├── policy.py           模型加载（两种格式）+ 预处理 + 推理
+    │   ├── act.py              旧 act_v2 网络（opus_inference_train 训练的模型）
+    │   ├── act_ref.py          act_ref 模型的推理封装（= 官方 ACTPolicy 推理分支）
+    │   ├── detr/               官方 ACT 网络代码（从 yam_train 原样拷贝）
     │   └── server.py           可选：远程 GPU 推理服务
     ├── control/              「小脑」：动作怎么执行
     │   ├── scheduler.py        chunk 调度 + 安全过滤
@@ -162,12 +165,25 @@ sequenceDiagram
 
 ### `policy/`：网络
 
+两种模型格式，`Policy` 按 checkpoint 的 `format` 字段自动选择：
+
+| | act_v2（旧） | act_ref（`yam_train/act_ref-v1`，当前训练主线） |
+|---|---|---|
+| 训练项目 | opus_inference_train | yam_train（按官方 ACT 源码） |
+| 网络代码 | `policy/act.py` | `policy/detr/`（官方源码，未改）+ `policy/act_ref.py` |
+| 任务 | 一个模型多个任务，任务编号作为输入 | 一个模型一个任务 |
+| 输入图像 | JPEG 往返 → 缩放到 240×320 | JPEG 往返，**不缩放**（480×640） |
+| chunk | 50 | 100 |
+| 动作对齐 | 第 0 步 = 主臂(t) | 第 0 步 = 主臂(t−1)（`action_shift: 1`，见 `models.yaml` 的 `compensate_action_shift`） |
+| 计算精度（GPU） | bf16 | fp32（同源码） |
+| 归一化 / 安全范围 | `stats.qpos/action`、`action_norm` | `stats.qpos_mean/std`、`action_mean/std`、`leader_min/max` |
+
 | 成员 | 作用 |
 |---|---|
-| `policy.preprocess_frame()` | 原图 → JPEG q90 编解码 → INTER_AREA 缩放到 240×320（与训练一致） |
-| `policy.Policy` | 读 `.pt`，重建 `ACT`，载入权重、归一化统计量、任务列表、起始姿态；GPU 上 bf16 |
-| `Policy.predict()` | 两路图像 + 14 维 qpos + 任务名 → `(50, 14)` **绝对**关节目标 |
-| `act.ACT` / `ACTConfig` | 网络结构；必须与训练端 `opus_inference_train/opus/model/act.py` 一致 |
+| `policy.preprocess_frame()` | 原图 → JPEG q90 编解码（与录制同一个编码器）→ 缩放到模型的 `image_size`（尺寸相同就不缩放） |
+| `policy.Policy` | 读 `.pt`，按格式重建网络、载入权重和统计量；检查任务是否在模型的 `tasks` 里 |
+| `Policy.predict()` | 两路图像 + 14 维 qpos + 任务名 → `(chunk, 14)` **绝对**关节目标；`last_raw` 是网络原始输出 |
+| `act_ref.ACTRefPolicy` | 官方 `ACTPolicy` 的推理分支：ImageNet 归一化 → `DETRVAE`（z = 0）。建网络时临时让 `is_main_process()` 返回 False，避免下载 ImageNet 权重（权重随后从 checkpoint 载入） |
 | `server.py` | 机器人没 GPU 时远程推理；协议：4 字节长度 + JSON 头 + JPEG（不用 pickle） |
 
 ### `control/scheduler.py`
@@ -292,7 +308,7 @@ flowchart LR
 | 键 | 默认 | 内容 |
 |---|---|---|
 | `execution.mode` | chunk | chunk：一个计划执行 `horizon` 步再换；ensemble：每帧重新规划并加权平均（`--exec-mode`） |
-| `execution.horizon` | 30 | chunk 模式每个计划执行的步数 = 重新看图的间隔（30 步 = 1 s），1–50（`--exec-horizon`） |
+| `execution.horizon` | 30 | chunk 模式每个计划执行的步数 = 重新看图的间隔（30 步 = 1 s），1 到模型的 chunk 长度（act_v2 50、act_ref 100）（`--exec-horizon`） |
 | `execution.blend_s` | 0.1 | chunk 模式新旧计划交叉淡化时长 s，0 = 直接切换（`--blend-s`） |
 | `execution.ensemble_m` | 0.01 | ensemble 模式权重 exp(-m·i)：>0 老计划占优（平滑），<0 新计划占优（灵敏）（`--ensemble-m`） |
 | `episode.max_seconds` | 40.0 | 单回合最长时间（秒），到时结束本回合（`--max-seconds`） |
@@ -321,23 +337,44 @@ flowchart LR
 | `arms.<side>.leader` | 推理不用，格式校验要求存在 |
 | `cameras` | `left_wrist` / `right_wrist` 序列号 |
 
+### `configs/models.yaml`：本次运行的那一个模型
+
+只有一个 `model:` 段生效，`run_robot.sh` 不带参数就用它。文件里写好了两段：旧 act_v2（生效，默认任务 block）和新 act_ref（注释掉）。换模型 = 改字段，或者注释一段、打开另一段。
+
+| 键（`model.`） | 必填 | 内容 |
+|---|---|---|
+| `ckpt` | ✅ | 模型文件，相对项目根目录 |
+| `format` | ✅ | `act_v2`（旧，一个文件含多个任务）/ `act_ref`（yam_train，一个文件一个任务） |
+| `task` | ✅ | 要做的任务。act_v2：从文件包含的任务里选一个（现在 `put_blue_block_in_blue_cup`，可改 `put_banana_in_bowl`）；act_ref：文件自己的任务 |
+| `action_mode` | ✅ | 网络输出的含义：`delta` = 相对当前从臂的变化量（目标 = 当前 + 输出）；`abs` = 绝对关节角 |
+| `compensate_action_shift` | | 只对 act_ref：默认 false（同官方，第 0 步在观测时刻执行）；true：计划整体提前 1/fps（33 ms） |
+
+| 规则 | 说明 |
+|---|---|
+| 校验 | 启动时把 `format` / `task` / `action_mode` 和模型文件里记的对比，不一致直接报错退出（`action_mode` 写错会让目标完全错误，所以不允许「以配置为准」去改写模型的含义）；`horizon` 不能超过模型的 chunk 长度 |
+| 执行方式 | 不在这里配，只在 `run.yaml` 的 `execution`（命令行可临时覆盖）。act_ref 用官方做法就在 `run.yaml` 写 `mode: ensemble, ensemble_m: 0.01` |
+| 临时覆盖 | `--ckpt` / `--task`（或 `robot.env` 里的 `CKPT`）只改这一次，仍要通过上面的校验 |
+| 自检 | `scripts/check_env.py` 加载模型并做同样的校验 |
+
 ### 模型文件（`.pt`）
 
-| 键 | 内容 |
-|---|---|
-| `model`, `config` | 权重与 `ACTConfig`（dict） |
-| `stats` | qpos 与动作的均值/标准差/最小/最大 |
-| `action_mode`, `action_norm` | `abs` / `delta` 及网络输出归一化 |
-| `tasks` | 顺序 = 任务编号 |
-| `cameras`, `image_size`, `fps` | `[right_wrist, left_wrist]`、240×320、30 |
-| `start_pose` | 每个任务示范的平均起始姿态 |
+| 键 | act_v2 | act_ref |
+|---|---|---|
+| 格式标记 | 无 | `format: yam_train/act_ref-v1` |
+| 权重 / 结构 | `model`、`config`（`ACTConfig`） | `model`（`ACTPolicy.state_dict()`）、`config.policy`（官方参数名） |
+| 统计量 | `stats.qpos/action`、`action_norm` | `stats.qpos_mean/std`、`action_mean/std`、`leader_min/max` |
+| 任务 | `tasks`（顺序 = 任务编号） | `task` |
+| 相机 / 尺寸 / 频率 | `cameras`、240×320、30 | `camera_names`、480×640、30 |
+| chunk / 动作 | 50、`action_mode` | `chunk_size` 100、`action_mode`、`action_shift` |
+| 起始姿态 | 每个任务一个 | 一个 |
 
 ## 6. 与其他项目的关系
 
 ```mermaid
 flowchart LR
-    SI["SuperInference<br/>采集项目"] -->|"采集数据 MCAP"| TR["opus_inference_train<br/>训练"]
-    TR -->|"models/*.pt"| Y["yam_infer<br/>推理（本项目，自包含）"]
+    SI["SuperInference<br/>采集项目"] -->|"采集数据 MCAP"| TR["yam_train<br/>训练（act_ref，当前）"]
+    TR -->|"models/*.pt（每任务一个）"| Y["yam_infer<br/>推理（本项目，自包含）"]
+    OLD["opus_inference_train<br/>旧训练（act_v2）"] -. "models/act_v2_*.pt" .-> Y
     SI -. "一次性搬运：worker / i2rt SDK / 配置<br/>（VENDORED.md）" .-> Y
 ```
 

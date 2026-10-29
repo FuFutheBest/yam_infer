@@ -36,8 +36,8 @@ flowchart LR
 | 安装 + 自检（一次） | 机器人 | `bash scripts/setup_robot.sh --dev` → `ALL OK` |
 | 本机配置（一次） | 机器人 | `cp robot.env.example robot.env`；核对 `configs/hardware.yaml` |
 | 测试 | 两边 | `.venv/bin/python -m pytest -q` |
-| 离线演练 | 两边 | `.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl --dry-run <录制目录> [--fake-arms]` |
-| 真机 | 机器人 | 先关采集 WebUI → `bash scripts/run_robot.sh banana`（或 `block`） |
+| 离线演练 | 两边 | `.venv/bin/python -m yam_infer.run --dry-run <录制目录> [--fake-arms]` |
+| 真机 | 机器人 | `bash scripts/run_robot.sh`（用哪个模型、哪个任务、增量还是绝对：改 `configs/models.yaml`） |
 | 复盘 | 两边 | `.venv/bin/python -m yam_infer.tools.review runs_infer/<目录> --video` |
 | 硬件被占用 | 机器人 | `bash scripts/free_hw.sh`（`run_robot.sh` 会自动调用） |
 | 归位 | 机器人 | `bash scripts/home_arms.sh`（不管 worker 什么状态） |
@@ -52,12 +52,12 @@ flowchart LR
 
 | 项 | 值 |
 |---|---|
-| 模型 | ACT，51.6 M 参数，ResNet18 + Transformer，增量关节动作，chunk 50 @ 30 Hz |
+| 网络 | ACT（ResNet18 + Transformer）：旧 act_v2 51.6 M 参数 chunk 50；新 act_ref 按官方源码 chunk 100 |
 | 任务 | `put_banana_in_bowl`、`put_blue_block_in_blue_cup`（一个模型两个任务） |
-| 默认模型 | `models/act_v2_all.pt`；备用 `models/act_v2_delta_s15k.pt`（不进 git） |
+| 模型 | `configs/models.yaml` 只配一个（`models/*.pt` 不进 git）：旧 act_v2 多任务模型（默认，任务 block）或 yam_train 的 act_ref 单任务模型（已写好、注释掉） |
 | 机器人 | `team1@10.128.1.165:~/fufu/yam_infer`，Ubuntu 22.04，RTX 5090，Python 3.10，torch 2.7.1+cu128 |
 | 硬件配置 | `configs/hardware.yaml`（左从臂 can3 :1234，右从臂 can2 :1235，夹爪 crank_4310，相机序列号） |
-| 训练项目 | `~/Dev/MVIG/opus_inference_train`（改网络结构时同步 `yam_infer/policy/act.py`） |
+| 训练项目 | `~/Dev/MVIG/yam_train`（act_ref，当前）；旧模型来自 `opus_inference_train` |
 
 ## 代码地图
 

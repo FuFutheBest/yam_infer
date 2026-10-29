@@ -17,7 +17,7 @@ flowchart LR
 |---|---|
 | 测试 | `.venv/bin/python -m pytest -q` |
 | 代码检查 | `uvx ruff check .`（或 `.venv/bin/ruff check .`） |
-| 离线演练 | `.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl --dry-run <录制> [--fake-arms]` |
+| 离线演练 | `.venv/bin/python -m yam_infer.run --dry-run <录制> [--fake-arms]` |
 
 > 用户电脑的 `.venv` 是 Python 3.12 + CPU torch，只用于开发和离线验证；机器人用自己的 `.venv`（`setup_robot.sh` 生成），两边不能互相复制。
 
@@ -31,6 +31,7 @@ flowchart LR
 | `tests/test_state_history.py` | 图像↔关节对齐：按时间插值、超范围取边界、只保留 1 s、时间递增 | 无 |
 | `tests/test_recorder.py` | 录制：我们的 NEDF3 读取器能读、JPEG 与模型预处理逐字节一致、帧号引用、缺数据进 quarantine、空回合不留目录、崩溃回合下次启动被隔离 | 无 |
 | `tests/test_run_config.py` | `run.yaml` 读取：默认值、缺键 / 多余键 / 超范围报错 | 无 |
+| `tests/test_models.py` | `models.yaml` 解析与报错、注释好的 act_ref 段打开后可用、文件与配置不一致报错；act_ref 模型离线加载（不下载 ImageNet）、delta 换算、任务不符报错、480×640 不缩放 | 无（`tests/fake_act_ref.py` 造随机权重模型） |
 | `tests/test_tools.py` | `free_hw` 识别占用端口的 worker、解析 `python -u -m …`；`home_arms` 在「没有 worker」「有残留 worker」两种状态下都能归位且不留进程 | 无 |
 
 新功能请顺手加测试；涉及硬件的部分用 `FakeFollowerEndpoint` / `--fake` 模拟。
@@ -39,9 +40,10 @@ flowchart LR
 
 | 想做的事 | 改哪里 | 注意 |
 |---|---|---|
-| 换模型 | `models/` 放新 `.pt`，`robot.env` 改 `CKPT` | 新模型首次上机 `--max-joint-speed 0.8` |
-| 网络结构变了 | `yam_infer/policy/act.py` 与训练端同步 | 旧模型要还能加载就保持参数名不变 |
-| 新任务 | 训练端加任务 → 模型 `tasks` 自带；`run.py` 的 `--task` choices、`run_robot.sh` 的别名 | |
+| 换模型 / 换任务 | `models/` 放新 `.pt`（yam_train：`python -m yam_train.tools.export`），改 `configs/models.yaml` 的 `model:`（或打开注释好的 act_ref 段）；`format` / `task` / `action_mode` 要和文件一致 | 新模型首次上机 `--max-joint-speed 0.8`；先跑 `check_env.py` |
+| 新任务 | yam_train 训练该任务的模型 → `models.yaml` 的 `task` 写模型里的任务名 | 不用改代码 |
+| 换执行方式 | 只在 `configs/run.yaml` 的 `execution` | 例：act_ref 用官方的 `mode: ensemble`、`ensemble_m: 0.01`；`horizon` 上限随模型 chunk（50 / 100） |
+| 网络结构变了 | act_ref：yam_train 的 `detr/` 改了就重新拷入 `yam_infer/policy/detr/`（保持逐字节一致）；新格式：`policy/policy.py` 加一个加载分支 | 见 `VENDORED.md` |
 | 预处理变了 | `policy/policy.py: preprocess_frame` | 必须与训练端完全一致 |
 | 执行策略（chunk/ensemble/新方法） | `control/scheduler.py` | 先在 `test_scheduler.py` 写用例 |
 | 调执行参数（现场调试） | `configs/run.yaml` 的 `execution`，或命令行 `--exec-mode / --exec-horizon / --blend-s / --ensemble-m` | 先调 `horizon`，再试 `mode`；效果看 `review.py` 和录制的 `meta.json` |

@@ -8,7 +8,7 @@
 flowchart LR
     S["setup_robot.sh<br/>一次性装环境 + 自检"]
     S --> D["yam_infer.run --dry-run<br/>离线演练"]
-    D --> R["run_robot.sh banana / block<br/>真机"]
+    D --> R["run_robot.sh<br/>真机（模型见 models.yaml）"]
     F["free_hw.sh<br/>谁占着硬件 → 问要不要停"] -. 自动调用 .-> R
     R --> V["tools.review<br/>复盘"]
     R -. 异常后手臂不在位 .-> H["home_arms.sh<br/>任何状态下归位"]
@@ -21,7 +21,7 @@ flowchart LR
 | `.venv/bin/python scripts/check_env.py` | 机器人 | 环境自检（setup 最后会自动跑） | 否 |
 | `.venv/bin/python -m pytest -q` | 两边 | 改代码后 | 否 |
 | `.venv/bin/python -m yam_infer.run … --dry-run <录制>` | 两边 | 不碰硬件跑一遍全流程 | 否 |
-| `bash scripts/run_robot.sh banana` / `block` | 机器人 | 真机运行 | **是** |
+| `bash scripts/run_robot.sh [额外参数]` | 机器人 | 真机运行；模型、任务、增量/绝对都在 `configs/models.yaml` | **是** |
 | `.venv/bin/python -m yam_infer.tools.review runs_infer/<目录> --video` | 两边 | 复盘 | 否 |
 | `bash scripts/free_hw.sh [--check] [--sudo]` | 机器人 | 开不了机械臂时：列出占用 CAN / 相机 / RPC 端口的程序并问要不要停；CAN 口没 UP 就问要不要重置（`run_robot.sh` 自动调用） | 停程序可能让手臂断力 |
 | `bash scripts/home_arms.sh` | 机器人 | 不管 worker 什么状态，把两只手臂慢速归位再断电 | **是** |
@@ -46,20 +46,20 @@ flowchart LR
 
 `check_env.py` 检查：torch + GPU、numpy/cv2、pyrealsense2/portal、i2rt 依赖、i2rt SDK 能生成 YAM+crank_4310 的 MuJoCo 模型、`hardware.yaml` 端口与相机、`models/*.pt`、worker 模块可导入。最后一行 `ALL OK` 才算通过。
 
-## 3. `scripts/run_robot.sh <banana|block> [额外参数]`
+## 3. `scripts/run_robot.sh [额外参数]`
 
 ```mermaid
 flowchart TB
-    A["读 robot.env<br/>CKPT、HW_CONFIG"] --> A2{".venv 和模型存在？"}
+    A["读 robot.env<br/>HW_CONFIG、可选 CKPT"] --> A2{".venv 存在？"}
     A2 -->|否| X0["报错退出"]
     A2 -->|是| B["free_hw：列出占用者 → 问要不要停<br/>CAN 口没 UP → 问要不要重置"]
     B -->|仍被占用 / 你选了不停| X["退出，不启动"]
-    B -->|硬件空闲| F["exec .venv/bin/python -m yam_infer.run<br/>--ckpt --task --hw-config 额外参数"]
+    B -->|硬件空闲| F["exec .venv/bin/python -m yam_infer.run<br/>--task（+ --ckpt）--hw-config 额外参数<br/>run.py 按 models.yaml 选模型并检查"]
 ```
 
 | 变量（`robot.env`） | 默认 |
 |---|---|
-| `CKPT` | `models/act_v2_all.pt`；临时换：`CKPT=models/act_v2_delta_s15k.pt bash scripts/run_robot.sh block` |
+| `CKPT` | 不设 = 用 `configs/models.yaml` 的模型；临时换同类模型：`CKPT=models/act_v2_delta_s15k.pt bash scripts/run_robot.sh`（仍按 models.yaml 校验格式 / 任务 / 增量绝对） |
 | `HW_CONFIG` | `configs/hardware.yaml` |
 | `YAM_LEFT_CAM_SERIAL` / `YAM_RIGHT_CAM_SERIAL` | 不设则用 `hardware.yaml` 的 `cameras:` |
 
@@ -76,8 +76,9 @@ flowchart TB
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--ckpt` | 必填 | 模型文件 |
-| `--task` | 必填 | `put_banana_in_bowl` / `put_blue_block_in_blue_cup` |
+| `--models-config` | `configs/models.yaml` | 模型及其解读方式 |
+| `--ckpt` | `models.yaml` 的 `ckpt` | 临时换模型文件 |
+| `--task` | `models.yaml` 的 `task` | 临时换任务（旧多任务模型里选另一个） |
 | `--hw-config` | `configs/hardware.yaml` | 从臂 + 相机配置 |
 | `--left-serial` / `--right-serial` | 配置文件 | 相机序列号覆盖 |
 | `--remote host:port` | 关 | 用远程推理服务 |
@@ -86,7 +87,7 @@ flowchart TB
 | `--goto-start` | `task_mean` | 每回合前移到示范平均起始姿态；`none` 不动 |
 | `--park` | `home` | 退出时：`home` 回休息姿态再断电；`start` 只回起始姿态；`none` 直接断电（**会掉**） |
 | `--exec-mode` | 读 `run.yaml` `execution.mode`（chunk） | `chunk` 承诺执行 / `ensemble` 时间集成 |
-| `--exec-horizon` | 读 `execution.horizon`（30） | chunk 模式每个计划执行多少步 = 多久重新看图（30 步 = 1 s），1–50 |
+| `--exec-horizon` | 读 `execution.horizon`（30） | chunk 模式每个计划执行多少步 = 多久重新看图（30 步 = 1 s），1 到模型的 chunk 长度（act_v2 50、act_ref 100） |
 | `--blend-s` | 读 `execution.blend_s`（0.1） | chunk 模式换计划时的交叉淡化时长 |
 | `--ensemble-m` | 读 `execution.ensemble_m`（0.01） | ensemble 模式权重系数 |
 | `--margin` | 0.15 | 允许超出示范范围的弧度 |
@@ -102,7 +103,7 @@ flowchart TB
 
 ```bash
 # 最快：模拟臂在主进程里
-.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl \
+.venv/bin/python -m yam_infer.run \
     --dry-run sample_episodes/put_banana_in_bowl/episode_0019 --record-dir runs_infer_dryrun
 # 更接近真机：真实 worker 进程 + 模拟臂（端口 1234/1235 必须空闲，采集 WebUI 开着时会被拒绝）
 … --fake-arms
@@ -132,7 +133,7 @@ flowchart TB
 # 离线重跑模型，验证录制能复现网络输出（机器人上用 --device cuda 和现场一致）
 .venv/bin/python -m yam_infer.tools.replay_policy runs_infer/<目录> --ckpt models/act_v2_all.pt
 # 推理录制本身也是 NEDF3，可以直接当离线演练的输入
-.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl --dry-run runs_infer/<目录>
+.venv/bin/python -m yam_infer.run --dry-run runs_infer/<目录>
 ```
 
 | 目录 | 含义 |
@@ -208,5 +209,5 @@ flowchart TB
 # GPU 机器
 python -m yam_infer.policy.server --ckpt models/act_v2_all.pt --host <局域网 IP> --port 5555
 # 机器人
-bash scripts/run_robot.sh banana --remote <GPU 机 IP>:5555
+bash scripts/run_robot.sh --remote <GPU 机 IP>:5555
 ```

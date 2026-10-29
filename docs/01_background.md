@@ -178,4 +178,4 @@ flowchart LR
 | val 没有明显上升                     | 没有严重过拟合，15k 和 30k 差别很小                      |
 | KL → 1e-5                            | z 基本没用上（示范风格很一致），推理时本来就用 z=0，无害 |
 
-> 改网络结构时，要同步修改本项目的 `yam_infer/policy/act.py`，否则无法加载新模型。
+> 上面是旧 act_v2 模型。当前训练主线 yam_train（act_ref）按官方 ACT 源码：一个任务一个模型、480×640 原图、chunk 100；推理端两种都支持，对照见 `02_architecture.md` 的「policy/」一节。

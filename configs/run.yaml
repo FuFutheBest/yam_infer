@@ -4,18 +4,22 @@
 # (settings).  Unknown keys or bad values stop the program.
 
 execution:
-  # how the 50-step plans (30 steps/s, fixed by the model) are
-  # turned into motion:
+  # How the model's plans are turned into motion.  The ONLY place to
+  # set this (models.yaml only says which model / how to read it).
+  # A plan = chunk_size steps at 30 steps/s, fixed by the model:
+  #   act_v2  (old):  50 steps = 1.7 s
+  #   act_ref (new): 100 steps = 3.3 s
   #   chunk:    follow one plan for `horizon` steps, then switch
   #             (uses: horizon, blend_s)
   #   ensemble: re-plan every frame (~30/s), average all plans
   #             that cover a moment (uses: ensemble_m)
   # Official ACT (tonyzhaozh/act imitate_episodes.py) equivalents:
-  #   default:          mode: chunk, horizon: 50, blend_s: 0
+  #   default:          mode: chunk, horizon: <chunk_size>, blend_s: 0
   #   --temporal_agg:   mode: ensemble, ensemble_m: 0.01
   mode: chunk
   # [chunk only] steps executed per plan = how often the model
-  # looks again (30 -> every 1.0 s).  1..50.
+  # looks again (30 -> every 1.0 s).  1..chunk_size (checked at
+  # start: 50 for act_v2, 100 for act_ref).
   #   larger:  more decisive, slower to react
   #   smaller: reacts faster, may hesitate (plans often start
   #            with "wait a moment, then move")

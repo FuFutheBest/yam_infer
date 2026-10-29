@@ -96,13 +96,13 @@ bash scripts/setup_robot.sh --dev         # 最后一行应是 ALL OK
 ### ④ 核对配置
 
 ```bash
-cp -n robot.env.example robot.env         # 默认模型 models/act_v2_all.pt
+cp -n robot.env.example robot.env         # 模型在 configs/models.yaml
 ```
 
 | 文件 | 核对 |
 |---|---|
 | `configs/hardware.yaml` | CAN 口、相机序列号与本机一致 |
-| `robot.env` | `CKPT` 指向要用的模型 |
+| `configs/models.yaml` | 要用的模型、任务、`action_mode`（`check_env.py` 会加载并校验） |
 
 ### ⑤ 演练录制
 
@@ -115,7 +115,7 @@ cp -r ~/fufu/opus_inference_train/sample_episodes .       # 本机已有两条
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl \
+.venv/bin/python -m yam_infer.run \
     --dry-run sample_episodes/put_banana_in_bowl/episode_0019 --record-dir runs_infer_dryrun
 # 采集 WebUI 关着时，再加 --fake-arms 走一遍真实 worker 进程
 ```
@@ -129,7 +129,7 @@ cp -r ~/fufu/opus_inference_train/sample_episodes .       # 本机已有两条
 | 人在急停旁 | 必须 |
 
 ```bash
-bash scripts/run_robot.sh banana --max-joint-speed 0.8
+bash scripts/run_robot.sh --max-joint-speed 0.8
 ```
 
 ## 4. 常见问题

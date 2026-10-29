@@ -1,0 +1,42 @@
+# The ONE model `bash scripts/run_robot.sh` runs, and how to read it.
+# To switch: edit `model:` below, or comment it out and uncomment
+# another block.  Exactly one `model:` may be active.
+#
+#   ckpt         model file (relative to the project root)
+#   format       act_v2  : old, opus_inference_train; one file for
+#                          several tasks, 240x320 images, chunk 50
+#                act_ref : yam_train (official ACT source); one task
+#                          per file, 480x640 images, chunk 100
+#   task         the task to run.  act_v2: pick one of the tasks the
+#                file contains; act_ref: the file's own task
+#   action_mode  what the network outputs:
+#                  delta : change relative to the current follower
+#                          state (target = current + output)
+#                  abs   : absolute joint angles
+#   compensate_action_shift   act_ref only, optional (default false)
+#                act_ref learns step 0 = leader at t-1.  false: run
+#                step 0 at the observation time (like the source);
+#                true: shift the plan 1/fps (33 ms) earlier
+#
+# format / task / action_mode are checked against the file at start:
+# a mismatch stops the program (a wrong action_mode would send wrong
+# targets).
+# How the plans are executed (chunk / ensemble ...) is set in run.yaml
+# only; for act_ref the official ACT way is run.yaml
+#   execution: {mode: ensemble, ensemble_m: 0.01}
+
+# ---- old act_v2 model (one file, two tasks: choose with `task`) ----
+model:
+  ckpt: models/act_v2_all.pt
+  format: act_v2
+  # put_blue_block_in_blue_cup | put_banana_in_bowl
+  task: put_blue_block_in_blue_cup
+  action_mode: delta
+
+# ---- new yam_train act_ref model (one task per file) ----
+# model:
+#   ckpt: models/banana_delta.pt
+#   format: act_ref
+#   task: put_banana_in_bowl
+#   action_mode: delta          # banana_abs.pt -> abs
+#   compensate_action_shift: false

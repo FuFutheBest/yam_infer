@@ -13,6 +13,8 @@
 | `configs/hardware.yaml` | `configs/i2rt_d405_yam_teleop.yaml` | 新增 `cameras:`（原来读 SI WebUI 的 `.superinference/local/i2rt_hardware_bindings.json`） |
 | `third_party/i2rt/` | `third_party/i2rt/`（i2rt 1.1.2，MIT） | 裁剪：删掉 `tests/`、`flow_base/`、`docs/`、`examples/`、`devices/`，以及本机不用的机械臂/夹爪模型（`big_yam`、`yam_pro`、`yam_ultra`、`flexible_4310`、`linear_3507`、`linear_4310`、`station`）。代码未改 |
 | `third_party/i2rt/scripts/reset_all_can.sh` | 同名 | 无 |
+| `yam_infer/policy/detr/` | `yam_train/detr/`（yam_train @a19da02）= `tonyzhaozh/act` @742c753 的 `detr/models`、`detr/util/misc.py`，MIT（`detr/LICENSE`） | 无（与 yam_train 逐字节一致；yam_train 相对官方只改了 import 路径、删 IPython 行）。**加载时**由 `policy/act_ref.py` 临时让 `backbone.is_main_process()` 返回 False，避免建网络时下载 ImageNet 权重 |
+| `yam_infer/policy/act_ref.py` 的 `SOURCE_DEFAULTS` / `make_args` | `yam_train/policy.py` | 只保留推理分支（无优化器、无损失） |
 | `yam_infer/data/nedf3_schemas/*.desc` | SI 采集文件里嵌入的 protobuf 定义（`nmx.msg.Metadata` / `ArmState` / `HandState` / `RGBD`），用 `scripts/extract_nedf3_schemas.py` 提取 | 无（原样字节） |
 | `yam_infer/data/nedf3_writer.py` 的话题、字段用法 | `consumer/io/nedf3_i2rt_contract.py`、`async_data_saver_i2rt_NEDF3.py` | 自己实现（不用 dm3_core）；`header.seq` / `stamp` 填值；夹爪 100 Hz；无主臂话题 |
 | `tests/test_follower_runtime.py` | `tests/devices/test_i2rt_teleop_watchdog.py` | 只移植 runtime 相关用例 |
