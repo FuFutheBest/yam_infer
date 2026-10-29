@@ -57,7 +57,7 @@ def main() -> None:
     groups = {
         "right_arm": slice(7, 13),
         "right_gripper": slice(13, 14),
-        "left_all(frozen by default)": slice(0, 7),
+        "left_all": slice(0, 7),
     }
     clipped = {k: float(np.nanmean(modified[:, g])) for k, g in groups.items()}
     print(

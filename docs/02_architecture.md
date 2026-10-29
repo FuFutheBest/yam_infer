@@ -73,7 +73,7 @@ flowchart TB
         HIST[("StateHistory<br/>最近 1 s 关节")]
         POL["策略线程 ≤30 Hz<br/>需要新 chunk 时才推理（GPU）<br/>关节取图像时刻的插值"]
         SCH[("ActionScheduler")]
-        CTRL["控制循环 100 Hz（主线程）<br/>插值 → 左臂冻结 → 安全过滤 → 下发"]
+        CTRL["控制循环 100 Hz（主线程）<br/>插值 → 冻结（可选）→ 安全过滤 → 下发"]
         HB["心跳线程<br/>>30 ms 没下发就重发上一个目标"]
         REC["RunRecorder"]
         CAM --> POL --> SCH --> CTRL
@@ -122,7 +122,7 @@ stateDiagram-v2
 ```mermaid
 flowchart LR
     A["读从臂状态 qpos<br/>写入 StateHistory"] --> B["scheduler.target_at(now)"]
-    B --> C["左臂 0–6 维<br/>替换为开始时姿态"]
+    B --> C["若 freeze_left/right：<br/>该臂 0–6 / 7–13 维替换为开始时姿态"]
     C --> D["SafetyFilter<br/>范围 → 速度"]
     D --> E["arms.submit(…, ACTIVE)"]
     E --> F["recorder 记录"]

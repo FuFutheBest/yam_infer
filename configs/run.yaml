@@ -32,6 +32,15 @@ execution:
   #   < 0 newest plans dominate (reactive, may jitter)
   ensemble_m: 0.01
 
+control:
+  # true = this arm ignores the model and holds the pose it had when
+  # the episode started (dims 0-6 = left, 7-13 = right).
+  # Both false = the model drives both arms (symmetric).
+  # Command line: --freeze-left / --no-freeze-left,
+  #               --freeze-right / --no-freeze-right
+  freeze_left: false
+  freeze_right: false
+
 episode:
   # an episode ends ("max_seconds") after this many seconds of
   # policy control; the demos last 12-25 s

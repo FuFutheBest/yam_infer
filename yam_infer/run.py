@@ -195,9 +195,12 @@ def run_episode(
             history.add(t_read, qpos)
             raw = None if paused.is_set() else scheduler.target_at(now)
             target = last_target if raw is None else raw
-            if args.freeze_left:
+            if args.freeze_left or args.freeze_right:
                 target = target.copy()
-                target[0:7] = hold[0:7]
+                if args.freeze_left:
+                    target[0:7] = hold[0:7]
+                if args.freeze_right:
+                    target[7:14] = hold[7:14]
             safe = safety(target, 1.0 / CONTROL_HZ)
             arms.submit(safe, "ACTIVE")
             last_target = safe
@@ -406,11 +409,20 @@ def main() -> None:
     )
     p.add_argument("--margin", type=float, default=0.15, help="rad allowed outside the demo range")
     p.add_argument("--max-joint-speed", type=float, default=1.5, help="rad/s safety limit")
+    for side in ("left", "right"):
+        p.add_argument(
+            f"--freeze-{side}",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=f"hold the {side} arm at its episode-start pose instead of following the model; "
+            f"default: control.freeze_{side} of --run-config",
+        )
     p.add_argument(
         "--move-left",
         dest="freeze_left",
-        action="store_false",
-        help="let the model move the left arm (default: left arm held still, as in the demos)",
+        action="store_const",
+        const=False,
+        help="old alias of --no-freeze-left",
     )
     p.add_argument(
         "--run-config",
@@ -464,6 +476,9 @@ def main() -> None:
             setattr(args, arg, ex[key])
     if args.blend_s is None:
         args.blend_s = ex["blend_s"]
+    for key in ("freeze_left", "freeze_right"):
+        if getattr(args, key) is None:
+            setattr(args, key, run_cfg["control"][key])
     if args.max_seconds is None:
         args.max_seconds = run_cfg["episode"]["max_seconds"]
     args.compensate_action_shift = model_cfg.compensate_action_shift

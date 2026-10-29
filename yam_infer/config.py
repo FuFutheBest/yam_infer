@@ -23,6 +23,10 @@ EXECUTION_SCHEMA = {
 }
 RUN_CONFIG_SCHEMA = {
     "execution": EXECUTION_SCHEMA,
+    "control": {
+        "freeze_left": (bool, lambda v: True, "true or false"),
+        "freeze_right": (bool, lambda v: True, "true or false"),
+    },
     "episode": {"max_seconds": (float, lambda v: v > 0, "> 0 s")},
 }
 
@@ -52,7 +56,8 @@ def _check(path: Path, where: str, raw: dict, schema: dict, required: bool) -> d
         value = raw[key]
         if typ is float and isinstance(value, int) and not isinstance(value, bool):
             value = float(value)
-        if not isinstance(value, typ) or isinstance(value, bool) or not ok(value):
+        is_bool = isinstance(value, bool)
+        if not isinstance(value, typ) or (is_bool != (typ is bool)) or not ok(value):
             raise ValueError(f"{path}: {where}.{key} = {raw[key]!r}, expected {rng}")
         out[key] = value
     return out
@@ -98,7 +103,9 @@ def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
     allowed = {*required, "compensate_action_shift"}
     extra = sorted(set(raw) - allowed)
     if "execution" in extra:
-        raise ValueError(f"{path}: model.execution is not used any more - set execution in run.yaml")
+        raise ValueError(
+            f"{path}: model.execution is not used any more - set execution in run.yaml"
+        )
     if extra:
         raise ValueError(f"{path}: unknown key(s) model.{extra}")
     for key in required:
@@ -135,4 +142,6 @@ def check_model_matches(cfg: ModelConfig, fmt: str, tasks: list[str], action_mod
             f"action_mode: file was trained with {action_mode!r}, models.yaml says {cfg.action_mode!r}"
         )
     if problems:
-        raise ValueError(f"{cfg.ckpt.name} does not match configs/models.yaml: " + "; ".join(problems))
+        raise ValueError(
+            f"{cfg.ckpt.name} does not match configs/models.yaml: " + "; ".join(problems)
+        )

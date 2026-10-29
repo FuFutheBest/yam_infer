@@ -92,7 +92,8 @@ flowchart TB
 | `--ensemble-m` | 读 `execution.ensemble_m`（0.01） | ensemble 模式权重系数 |
 | `--margin` | 0.15 | 允许超出示范范围的弧度 |
 | `--max-joint-speed` | 1.5 | rad/s；**新模型第一次上机建议 0.8** |
-| `--move-left` | 关 | 允许模型动左臂 |
+| `--freeze-left` / `--no-freeze-left` | 读 `run.yaml` `control.freeze_left`（false） | 冻结左臂：保持回合开始姿态，不跟网络输出（`--move-left` = 旧别名，等于 `--no-freeze-left`） |
+| `--freeze-right` / `--no-freeze-right` | 读 `control.freeze_right`（false） | 同上，右臂 |
 | `--run-config` | `configs/run.yaml` | 运行参数文件 |
 | `--max-seconds` | 读 `run.yaml` 的 `episode.max_seconds`（40） | 单回合最长时间；命令行给了就以命令行为准 |
 | `--record-dir` | `runs_infer` | 记录目录 |

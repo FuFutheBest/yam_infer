@@ -13,6 +13,7 @@ def test_project_config_loads() -> None:
     cfg = load_run_config(DEFAULT_RUN_CONFIG)
     assert cfg["execution"] == {"mode": "chunk", "horizon": 30, "blend_s": 0.1, "ensemble_m": 0.01}
     assert cfg["episode"]["max_seconds"] == 40.0
+    assert cfg["control"] == {"freeze_left": False, "freeze_right": False}
 
 
 @pytest.mark.parametrize(
@@ -25,6 +26,8 @@ def test_project_config_loads() -> None:
         (("max_seconds: 40.0", "max_seconds: 0"), "episode.max_seconds"),
         (("\n  horizon: 30", "\n  horizon: 30\n  horizn: 20"), "unknown key"),
         (("  ensemble_m: 0.01\n", ""), "missing execution.ensemble_m"),
+        (("freeze_left: false", "freeze_left: 0"), "control.freeze_left"),
+        (("  freeze_right: false\n", ""), "missing control.freeze_right"),
     ],
 )
 def test_bad_values_are_rejected(tmp_path: Path, patch, message) -> None:
