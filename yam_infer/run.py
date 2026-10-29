@@ -82,6 +82,7 @@ def run_episode(
         args.ensemble_m,
         mode=args.exec_mode,
         horizon=args.exec_horizon,
+        blend_s=args.blend_s,
     )
     safety = SafetyFilter(
         policy.a_min,
@@ -324,18 +325,51 @@ def build_run_meta(args) -> dict:
     return meta
 
 
-def load_max_seconds(run_config: Path) -> float:
-    """episode.max_seconds from the run config (a positive number)."""
+RUN_CONFIG_SCHEMA = {  # section -> key -> (type, check, description of the valid range)
+    "execution": {
+        "mode": (str, lambda v: v in ("chunk", "ensemble"), "chunk or ensemble"),
+        "horizon": (int, lambda v: 1 <= v <= 50, "1..50 steps"),
+        "blend_s": (float, lambda v: 0 <= v <= 2, "0..2 s"),
+        "ensemble_m": (float, lambda v: -5 <= v <= 5, "-5..5"),
+    },
+    "episode": {
+        "max_seconds": (float, lambda v: v > 0, "> 0 s"),
+    },
+}
+
+
+def load_run_config(run_config: Path) -> dict[str, dict]:
+    """configs/run.yaml -> {section: {key: value}}; every key required, unknown keys rejected."""
     import yaml
 
     try:
         cfg = yaml.safe_load(Path(run_config).read_text()) or {}
-        value = float(cfg["episode"]["max_seconds"])
-    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"cannot read episode.max_seconds from {run_config}: {exc}") from exc
-    if not value > 0:
-        raise ValueError(f"{run_config}: episode.max_seconds must be > 0, got {value}")
-    return value
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"cannot read {run_config}: {exc}") from exc
+    if not isinstance(cfg, dict):
+        raise ValueError(f"{run_config}: top level must be a mapping")
+    unknown = sorted(set(cfg) - set(RUN_CONFIG_SCHEMA))
+    if unknown:
+        raise ValueError(f"{run_config}: unknown section(s) {unknown}")
+    out: dict[str, dict] = {}
+    for section, keys in RUN_CONFIG_SCHEMA.items():
+        raw = cfg.get(section)
+        if not isinstance(raw, dict):
+            raise ValueError(f"{run_config}: missing section '{section}'")
+        extra = sorted(set(raw) - set(keys))
+        if extra:
+            raise ValueError(f"{run_config}: unknown key(s) {section}.{extra}")
+        out[section] = {}
+        for key, (typ, ok, rng) in keys.items():
+            if key not in raw:
+                raise ValueError(f"{run_config}: missing {section}.{key}")
+            value = raw[key]
+            if typ is float and isinstance(value, int) and not isinstance(value, bool):
+                value = float(value)
+            if not isinstance(value, typ) or isinstance(value, bool) or not ok(value):
+                raise ValueError(f"{run_config}: {section}.{key} = {raw[key]!r}, expected {rng}")
+            out[section][key] = value
+    return out
 
 
 def main() -> None:
@@ -379,21 +413,27 @@ def main() -> None:
     p.add_argument(
         "--exec-mode",
         choices=["chunk", "ensemble"],
-        default="chunk",
-        help="chunk: execute --exec-horizon steps of each prediction, then re-plan (default); "
+        default=None,
+        help="default: execution.mode of --run-config. chunk: execute --exec-horizon steps of each plan, then re-plan; "
         "ensemble: re-plan every step + ACT temporal ensembling",
     )
     p.add_argument(
         "--exec-horizon",
         type=int,
-        default=30,
-        help="chunk mode: steps (at 30 Hz) per prediction",
+        default=None,
+        help="chunk mode: steps (30/s) per plan; default: execution.horizon of --run-config",
+    )
+    p.add_argument(
+        "--blend-s",
+        type=float,
+        default=None,
+        help="chunk mode: cross-fade between plans [s]; default: execution.blend_s of --run-config",
     )
     p.add_argument(
         "--ensemble-m",
         type=float,
-        default=0.01,
-        help="ensemble mode: >0 older predictions dominate (ACT paper 0.01); <0 newest dominates",
+        default=None,
+        help="ensemble mode: >0 older plans dominate, <0 newest; default: execution.ensemble_m of --run-config",
     )
     p.add_argument("--margin", type=float, default=0.15, help="rad allowed outside the demo range")
     p.add_argument("--max-joint-speed", type=float, default=1.5, help="rad/s safety limit")
@@ -407,7 +447,7 @@ def main() -> None:
         "--run-config",
         type=Path,
         default=DEFAULT_RUN_CONFIG,
-        help="run settings (episode.max_seconds, ...)",
+        help="run settings: execution.*, episode.max_seconds",
     )
     p.add_argument(
         "--max-seconds",
@@ -429,12 +469,26 @@ def main() -> None:
     args = p.parse_args()
     if args.fake_arms and not args.dry_run:
         p.error("--fake-arms needs --dry-run (no fake arms next to real cameras)")
+    try:
+        run_cfg = load_run_config(args.run_config)
+    except ValueError as exc:
+        p.error(str(exc))
+    ex = run_cfg["execution"]
+    for arg, key in (("exec_mode", "mode"), ("exec_horizon", "horizon"), ("ensemble_m", "ensemble_m")):
+        if getattr(args, arg) is None:
+            setattr(args, arg, ex[key])
+    if args.blend_s is None:
+        args.blend_s = ex["blend_s"]
     if args.max_seconds is None:
-        try:
-            args.max_seconds = load_max_seconds(args.run_config)
-        except ValueError as exc:
-            p.error(str(exc))
-    print(f"episode limit: {args.max_seconds:.0f} s")
+        args.max_seconds = run_cfg["episode"]["max_seconds"]
+    if not 1 <= args.exec_horizon <= 50:
+        p.error(f"--exec-horizon must be 1..50, got {args.exec_horizon}")
+    if args.exec_mode == "chunk":  # only the parameters that apply to the mode
+        used = (f"horizon={args.exec_horizon} steps (new plan every {args.exec_horizon / 30:.2f} s)"
+                f", blend={args.blend_s} s  [ensemble_m unused]")
+    else:
+        used = f"ensemble_m={args.ensemble_m} (new plan every frame)  [horizon, blend unused]"
+    print(f"execution: {args.exec_mode}: {used}  episode limit: {args.max_seconds:.0f} s")
 
     if args.remote:
         from yam_infer.policy.server import RemotePolicy

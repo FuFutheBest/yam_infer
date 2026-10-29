@@ -17,7 +17,7 @@ yam_infer/
 ├── configs/
 │   ├── hardware.yaml         两只从臂（CAN 口、RPC 端口、看门狗参数）+ 相机序列号
 │   ├── rest_pose.yaml        休息姿态（home_arms 的归位目标）
-│   └── run.yaml              运行参数（episode.max_seconds 回合时长上限）
+│   └── run.yaml              运行参数（执行方式 execution.*、回合时长 episode.max_seconds）
 ├── docs/                   本文档
 ├── scripts/                一键脚本（见 03_scripts.md）
 ├── tests/                  不需要硬件的自动测试（pytest）
@@ -287,9 +287,22 @@ flowchart LR
 
 ### `configs/run.yaml`
 
+命令行同名参数优先；启动时打印最终值并写进每个回合 `meta.json` 的 `settings`；缺键、多余键、超范围都直接报错。
+
 | 键 | 默认 | 内容 |
 |---|---|---|
-| `episode.max_seconds` | 40.0 | 单回合最长时间（秒），到时结束本回合；`--max-seconds` 可覆盖 |
+| `execution.mode` | chunk | chunk：一个计划执行 `horizon` 步再换；ensemble：每帧重新规划并加权平均（`--exec-mode`） |
+| `execution.horizon` | 30 | chunk 模式每个计划执行的步数 = 重新看图的间隔（30 步 = 1 s），1–50（`--exec-horizon`） |
+| `execution.blend_s` | 0.1 | chunk 模式新旧计划交叉淡化时长 s，0 = 直接切换（`--blend-s`） |
+| `execution.ensemble_m` | 0.01 | ensemble 模式权重 exp(-m·i)：>0 老计划占优（平滑），<0 新计划占优（灵敏）（`--ensemble-m`） |
+| `episode.max_seconds` | 40.0 | 单回合最长时间（秒），到时结束本回合（`--max-seconds`） |
+
+`horizon`、`blend_s` 只在 chunk 模式生效，`ensemble_m` 只在 ensemble 模式生效（启动时只打印当前模式用到的值）。
+
+| 想和官方 ACT（`../policy/act/imitate_episodes.py`）一致 | 配置 | 仍然存在的差别 |
+|---|---|---|
+| 默认（不加 `--temporal_agg`）：每 `chunk_size` 步看一次图，整段执行完再换 | `mode: chunk`、`horizon: 50`、`blend_s: 0` | 官方是同步的（等推理完再走下一步），我们是异步的：新计划从拍照时刻开始排时间，推理期间旧计划的最后一步会保持约 1–2 个控制周期 |
+| `--temporal_agg`：每步都重新推理，权重 exp(-0.01·i)，i = 0 是最老的计划 | `mode: ensemble`、`ensemble_m: 0.01` | 官方每个控制步推理一次（仿真 50 Hz）、按步号对齐；我们推理 ≤30 Hz、控制 100 Hz，按时间插值对齐 |
 
 ### `configs/rest_pose.yaml`
 

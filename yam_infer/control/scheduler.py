@@ -90,6 +90,8 @@ class ActionScheduler:
                     if new is not None
                     else (self._interp(*chunks[-2], t) if len(chunks) > 1 else None)
                 )
+            if self.blend_s <= 0:  # hard switch (official ACT without temporal_agg)
+                return new
             alpha = (t - t_new) / self.blend_s
             if alpha >= 1:
                 return new

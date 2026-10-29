@@ -85,9 +85,10 @@ flowchart TB
 | `--no-jpeg-roundtrip` | 关 | 跳过 JPEG 编解码（不建议） |
 | `--goto-start` | `task_mean` | 每回合前移到示范平均起始姿态；`none` 不动 |
 | `--park` | `home` | 退出时：`home` 回休息姿态再断电；`start` 只回起始姿态；`none` 直接断电（**会掉**） |
-| `--exec-mode` | `chunk` | `chunk` 承诺执行 / `ensemble` 时间集成 |
-| `--exec-horizon` | 30 | chunk 模式每次执行步数（30 Hz） |
-| `--ensemble-m` | 0.01 | ensemble 模式权重系数 |
+| `--exec-mode` | 读 `run.yaml` `execution.mode`（chunk） | `chunk` 承诺执行 / `ensemble` 时间集成 |
+| `--exec-horizon` | 读 `execution.horizon`（30） | chunk 模式每个计划执行多少步 = 多久重新看图（30 步 = 1 s），1–50 |
+| `--blend-s` | 读 `execution.blend_s`（0.1） | chunk 模式换计划时的交叉淡化时长 |
+| `--ensemble-m` | 读 `execution.ensemble_m`（0.01） | ensemble 模式权重系数 |
 | `--margin` | 0.15 | 允许超出示范范围的弧度 |
 | `--max-joint-speed` | 1.5 | rad/s；**新模型第一次上机建议 0.8** |
 | `--move-left` | 关 | 允许模型动左臂 |

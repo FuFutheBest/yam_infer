@@ -49,3 +49,19 @@ def test_safety_filter_range_and_speed() -> None:
     target[13] = 0.0  # close the right gripper fully: follows the model (only speed-limited)
     out = f(target, dt=1.0)
     assert out[13] == 0.0
+
+
+def test_chunk_switch_without_blend_is_a_hard_switch() -> None:
+    s = ActionScheduler(fps=30, chunk_size=50, mode="chunk", horizon=50, blend_s=0.0)
+    s.add(0.0, _chunk(start=0.0))
+    s.add(1.0, _chunk(start=1.0))
+    np.testing.assert_allclose(_at(s, 1.0), 1.0, atol=1e-9)  # new plan immediately
+
+
+def test_ensemble_matches_official_act_weights() -> None:
+    """ACT imitate_episodes.py --temporal_agg: w_i = exp(-0.01 * i), i = 0 oldest, normalised."""
+    s = ActionScheduler(fps=30, chunk_size=50, ensemble_m=0.01, mode="ensemble")
+    for i in range(3):
+        s.add(i / 30, _chunk(start=10.0 * i, step=0.0))  # constant plans 0, 10, 20
+    w = np.exp(-0.01 * np.arange(3))
+    np.testing.assert_allclose(_at(s, 2 / 30), (w * [0, 10, 20]).sum() / w.sum(), atol=1e-9)

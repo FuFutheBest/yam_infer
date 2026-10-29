@@ -1,5 +1,32 @@
 # Inference run settings, read by yam_infer.run (--run-config).
-# A value given on the command line overrides the one here.
+# A command-line value overrides the one here.  The effective values
+# are printed at start and stored in each episode's meta.json
+# (settings).  Unknown keys or bad values stop the program.
+
+execution:
+  # how the 50-step plans (30 steps/s, fixed by the model) are
+  # turned into motion:
+  #   chunk:    follow one plan for `horizon` steps, then switch
+  #             (uses: horizon, blend_s)
+  #   ensemble: re-plan every frame (~30/s), average all plans
+  #             that cover a moment (uses: ensemble_m)
+  # Official ACT (tonyzhaozh/act imitate_episodes.py) equivalents:
+  #   default:          mode: chunk, horizon: 50, blend_s: 0
+  #   --temporal_agg:   mode: ensemble, ensemble_m: 0.01
+  mode: chunk
+  # [chunk only] steps executed per plan = how often the model
+  # looks again (30 -> every 1.0 s).  1..50.
+  #   larger:  more decisive, slower to react
+  #   smaller: reacts faster, may hesitate (plans often start
+  #            with "wait a moment, then move")
+  horizon: 30
+  # [chunk only] cross-fade from the old plan to the new one [s]
+  # (0 = hard switch)
+  blend_s: 0.1
+  # [ensemble only] plan weight exp(-m * i), i = 0 = oldest.
+  #   > 0 older plans dominate (smooth, laggy; ACT paper: 0.01)
+  #   < 0 newest plans dominate (reactive, may jitter)
+  ensemble_m: 0.01
 
 episode:
   # an episode ends ("max_seconds") after this many seconds of
