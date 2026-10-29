@@ -12,19 +12,22 @@ import cv2
 import numpy as np
 import torch
 
+from yam_infer.data.nedf3_writer import encode_jpeg_rgb
 from yam_infer.policy.act import ACT, ACTConfig
 
 
 def preprocess_frame(
     rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True
 ) -> np.ndarray:
-    """RGB uint8 (480,640,3) -> RGB uint8 (H,W,3) exactly like the training pipeline."""
+    """RGB uint8 (480,640,3) -> RGB uint8 (H,W,3) exactly like the training pipeline.
+
+    The JPEG round-trip uses the recorder's own encoder, so decode(recorded JPEG) == the image
+    the model saw before resizing (tools/replay_policy.py calls this with jpeg_roundtrip=False).
+    """
     if jpeg_roundtrip:  # the training images went through the recorder's JPEG q90 encoder
-        ok, buf = cv2.imencode(".jpg", rgb[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])
-        if ok:
-            decoded = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-            if decoded is not None:
-                rgb = np.asarray(decoded)[:, :, ::-1]
+        decoded = cv2.imdecode(np.frombuffer(encode_jpeg_rgb(rgb), np.uint8), cv2.IMREAD_COLOR)
+        if decoded is not None:
+            rgb = np.asarray(decoded)[:, :, ::-1]
     h, w = size_hw
     return cv2.resize(np.ascontiguousarray(rgb), (w, h), interpolation=cv2.INTER_AREA)
 
@@ -53,6 +56,7 @@ class Policy:
         # absolute leader range seen in the demos -> used by the safety filter
         self.a_min, self.a_max = np.asarray(st["action"]["min"]), np.asarray(st["action"]["max"])
         self.step = ck.get("step")
+        self.last_raw: np.ndarray | None = None  # set by every predict
         self.jpeg_roundtrip = jpeg_roundtrip
 
     @property
@@ -93,7 +97,9 @@ class Policy:
         t = torch.tensor([self.tasks.index(task)], device=self.device)
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
             pred, _, _ = self.model(img, q, t)
-        return self.to_absolute(pred[0].float().cpu().numpy(), qpos)
+        raw = pred[0].float().cpu().numpy()  # normalised network output (K, 14)
+        self.last_raw = raw
+        return self.to_absolute(raw, qpos)
 
     def to_absolute(self, pred_norm: np.ndarray, qpos: np.ndarray) -> np.ndarray:
         """normalised network output (..., K, 14) -> absolute joint targets."""

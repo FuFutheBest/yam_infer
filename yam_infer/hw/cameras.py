@@ -13,9 +13,12 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
+
+# sink(camera name, arrival time [monotonic s], rgb frame, frame counter, hardware stamp [ns])
+FrameSink = Callable[[str, float, np.ndarray, int, int], None]
 
 
 def resolve_serials(
@@ -55,8 +58,11 @@ class RealSenseCamera:
             self.pipeline.wait_for_frames()
         self._frame: np.ndarray | None = None
         self._t = 0.0
-        self._count = 0
+        self._count = 0  # frame counter = header.seq of this camera's recorded frames
         self._lock = threading.Lock()
+        self.name = serial
+        self.sink: FrameSink | None = None
+        self._hw_ns = 0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True, name=f"cam-{serial}")
         self._thread.start()
@@ -71,13 +77,31 @@ class RealSenseCamera:
             if not color:
                 continue
             img = np.asanyarray(color.get_data()).copy()
+            t = time.monotonic()  # arrival time (same definition as SI's recorder)
+            try:
+                hw_ns = int(color.get_timestamp() * 1e6)  # RealSense hardware clock [ms -> ns]
+            except RuntimeError:
+                hw_ns = 0
             with self._lock:
-                self._frame, self._t = img, time.monotonic()
                 self._count += 1
+                self._frame, self._t, self._hw_ns, seq = img, t, hw_ns, self._count
+                sink = self.sink
+            if sink is not None:
+                sink(self.name, t, img, seq, hw_ns)
 
-    def latest(self) -> tuple[float, np.ndarray | None]:
+    def set_sink(self, sink: FrameSink | None) -> None:
+        """Attach a per-frame callback.  The current latest frame is handed over at once: it is
+        what the next grab() returns, so it must be in the recording too."""
         with self._lock:
-            return self._t, self._frame
+            self.sink = sink
+            frame, t, seq, hw_ns = self._frame, self._t, self._count, self._hw_ns
+        if sink is not None and frame is not None:
+            sink(self.name, t, frame, seq, hw_ns)
+
+    def latest(self) -> tuple[float, np.ndarray | None, int]:
+        """(arrival time, frame, frame counter)."""
+        with self._lock:
+            return self._t, self._frame, self._count
 
     def close(self) -> None:
         self._stop.set()
@@ -92,6 +116,7 @@ class CameraRig:
         try:
             for name, serial in serials.items():
                 self.cams[name] = RealSenseCamera(serial)
+                self.cams[name].name = name
         except Exception:
             self.close()
             raise
@@ -103,17 +128,23 @@ class CameraRig:
                 raise TimeoutError("cameras produced no frames")
             time.sleep(0.05)
 
-    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, float]]:
-        """Latest frame of every camera + its arrival time (time.monotonic(), same clock as the
-        follower state history).  Raises if a frame is older than max_age seconds."""
+    def set_sink(self, sink: FrameSink | None) -> None:
+        """sink(name, t, rgb, seq, hw_ns) is called for every new frame (None = stop)."""
+        for cam in self.cams.values():
+            cam.set_sink(sink)
+
+    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, tuple[float, int]]]:
+        """Latest frame of every camera + (arrival time, frame counter).  Times are
+        time.monotonic() (same clock as the follower state history).  Raises if a frame is older
+        than max_age seconds."""
         now = time.monotonic()
-        frames, times = {}, {}
+        frames, info = {}, {}
         for name, cam in self.cams.items():
-            t, f = cam.latest()
+            t, f, seq = cam.latest()
             if f is None or now - t > max_age:
                 raise RuntimeError(f"camera {name} stale ({now - t:.2f}s)")
-            frames[name], times[name] = f, t
-        return frames, times
+            frames[name], info[name] = f, (t, seq)
+        return frames, info
 
     def close(self) -> None:
         for c in self.cams.values():
@@ -121,24 +152,66 @@ class CameraRig:
 
 
 class ReplayCameraRig:
-    """Dry-run helper: serves frames from a recorded NEDF3 episode (no hardware)."""
+    """Dry-run helper: plays a recorded NEDF3 episode as two 30 Hz cameras (no hardware).
 
-    def __init__(self, episode_dir: str):
+    A background thread behaves like the RealSense threads: new frame every 1/30 s, arrival time,
+    frame counter, sink callback for the recorder."""
+
+    def __init__(self, episode_dir: str, fps: float = 30.0):
         from yam_infer.data.nedf3 import decode_jpeg_rgb, read_episode
 
         ep = read_episode(episode_dir)
         self._decode = decode_jpeg_rgb
-        self.frames = {name: ep.cameras[name][1] for name in ("right_wrist", "left_wrist")}
-        self.n = min(len(v) for v in self.frames.values())
-        self.t0 = time.monotonic()
+        self.jpegs = {name: ep.cameras[name][1] for name in ("right_wrist", "left_wrist")}
+        self.n = min(len(v) for v in self.jpegs.values())
+        self.fps = fps
+        self.sink: FrameSink | None = None
+        self._latest: dict[str, tuple[float, np.ndarray, int]] = {}
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    def wait_ready(self, timeout: float = 0) -> None:
-        self.t0 = time.monotonic()
+    def _loop(self) -> None:
+        t0 = time.monotonic()
+        i = 0
+        while not self._stop.is_set():
+            k = min(i, self.n - 1)  # hold the last frame at the end of the recording
+            frames = {name: self._decode(v[k]) for name, v in self.jpegs.items()}
+            t = time.monotonic()
+            with self._lock:
+                for name, rgb in frames.items():
+                    self._latest[name] = (t, rgb, i + 1)
+                sink = self.sink
+            if sink is not None:
+                for name, rgb in frames.items():
+                    sink(name, t, rgb, i + 1, 0)
+            i += 1
+            self._stop.wait(max(0.0, t0 + i / self.fps - time.monotonic()))
 
-    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, float]]:
-        i = min(int((time.monotonic() - self.t0) * 30), self.n - 1)
-        t = self.t0 + i / 30.0  # replayed frame "arrived" at its slot on the 30 Hz grid
-        return {k: self._decode(v[i]) for k, v in self.frames.items()}, dict.fromkeys(self.frames, t)
+    def wait_ready(self, timeout: float = 10.0) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._loop, daemon=True, name="cam-replay")
+            self._thread.start()
+        deadline = time.monotonic() + timeout
+        while len(self._latest) < len(self.jpegs):
+            if time.monotonic() > deadline:
+                raise TimeoutError("replay produced no frames")
+            time.sleep(0.01)
+
+    def set_sink(self, sink: FrameSink | None) -> None:
+        with self._lock:
+            self.sink = sink
+            latest = dict(self._latest)
+        if sink is not None:  # current frames = what the next grab() returns -> record them too
+            for name, (t, rgb, seq) in latest.items():
+                sink(name, t, rgb, seq, 0)
+
+    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, tuple[float, int]]]:
+        with self._lock:
+            latest = dict(self._latest)
+        return {k: v[1] for k, v in latest.items()}, {k: (v[0], v[2]) for k, v in latest.items()}
 
     def close(self) -> None:
-        pass
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)

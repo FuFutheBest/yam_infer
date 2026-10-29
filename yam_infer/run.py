@@ -72,7 +72,9 @@ class KeyReader:
             return None
 
 
-def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str:
+def run_episode(
+    args, policy, cams, arms, keys: KeyReader, ep_index: int, run_meta: dict | None = None
+) -> str:
     """One policy episode. Returns 'next' or 'quit'."""
     scheduler = ActionScheduler(
         policy.fps,
@@ -87,17 +89,6 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
         args.margin,
         args.max_joint_speed,
     )
-    recorder = RunRecorder(
-        Path(args.record_dir),
-        args.task,
-        {
-            "ckpt": str(args.ckpt),
-            "episode_index": ep_index,
-            "policy": policy.info(),
-            "settings": {k: v for k, v in vars(args).items() if k != "ckpt"},
-        },
-        fps=policy.fps,
-    )
     stop = threading.Event()
     paused = threading.Event()
     shared: dict = {"error": None}
@@ -106,18 +97,19 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     # image time, as in training (see control/state_history.py)
     history = StateHistory(seconds=1.0, rate_hz=CONTROL_HZ)
 
-    def policy_loop():
+    def policy_loop(recorder: RunRecorder):
         period = 1.0 / policy.fps
         t_next = time.monotonic()
         while not stop.is_set():
             try:
                 if not paused.is_set() and scheduler.needs_new_chunk(time.monotonic()):
-                    frames, cam_t = cams.grab()
-                    t_img = float(np.mean(list(cam_t.values())))  # observation time
+                    frames, cam = cams.grab()  # cam[name] = (arrival time, frame counter)
+                    t_img = float(np.mean([cam[c][0] for c in policy.cameras]))  # observation time
                     qpos = history.at(t_img)  # joints at that moment (interpolated)
                     t_infer = time.monotonic()
-                    chunk, images = policy.predict(frames, qpos, args.task)
-                    latency = (time.monotonic() - t_infer) * 1000
+                    chunk, _images = policy.predict(frames, qpos, args.task)
+                    t_done = time.monotonic()
+                    latency = (t_done - t_infer) * 1000
                     # the chunk starts at the observation time (training: actions a(t)...a(t+49)
                     # for the sample at t), so image age + inference latency are skipped over
                     scheduler.add(t_img, chunk)
@@ -125,10 +117,11 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
                         t_img,
                         qpos,
                         chunk,
-                        latency,
-                        images,
+                        cam_t=[cam[c][0] for c in policy.cameras],
+                        cam_seq=[cam[c][1] for c in policy.cameras],
                         t_infer=t_infer,
-                        cam_t=[cam_t[c] for c in policy.cameras],
+                        t_done=t_done,
+                        raw_out=policy.last_raw,
                     )
                     stats["policy_steps"] += 1
                     if (
@@ -155,26 +148,40 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     while True:
         k = keys.get(block=True)
         if k == "q":
-            recorder.close(end_reason="quit before start")
             return "quit"
         if k == "":
             break
 
+    recorder = RunRecorder(
+        Path(args.record_dir),
+        args.task,
+        {
+            **(run_meta or {}),
+            "ckpt": str(args.ckpt),
+            "episode_index": ep_index,
+            "policy": policy.info(),
+            "settings": {k: v for k, v in vars(args).items() if k != "ckpt"},
+        },
+        fps=policy.fps,
+    )
+    cams.set_sink(recorder.camera_sink)  # every camera frame from now on -> data/*.mcap
     hold = arms.get_state()
     history.add(time.monotonic(), hold)
     safety.reset(hold)
-    thread = threading.Thread(target=policy_loop, daemon=True)
+    thread = threading.Thread(target=policy_loop, args=(recorder,), daemon=True)
     thread.start()
     t_start = time.monotonic()
     end_reason = "unknown"
     t_next = time.monotonic()
     last_target = hold.copy()
+    recorder.event("start", t_start, max_seconds=args.max_seconds)
     print("  RUNNING  (Enter = pause/resume, r = end episode, q = quit)")
     try:
         while not stop.is_set():
             now = time.monotonic()
             qpos = arms.get_state()
-            history.add(time.monotonic(), qpos)  # stamped after the read, like SI's recorder
+            t_read = time.monotonic()  # stamped after the read, like SI's recorder
+            history.add(t_read, qpos)
             raw = None if paused.is_set() else scheduler.target_at(now)
             target = last_target if raw is None else raw
             if args.freeze_left:
@@ -183,16 +190,18 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             safe = safety(target, 1.0 / CONTROL_HZ)
             arms.submit(safe, "ACTIVE")
             last_target = safe
-            recorder.log_command(now, raw, safe, qpos)
+            recorder.log_command(t_read, raw, safe, qpos, getattr(arms, "last_sample_t", None))
 
             k = keys.get()
             if k == "":
                 if paused.is_set():
                     scheduler.clear()
                     paused.clear()
+                    recorder.event("resume")
                     print("  resumed")
                 else:
                     paused.set()
+                    recorder.event("pause")
                     print("  PAUSED (holding pose) - Enter to resume")
             elif k in ("r", "q"):
                 end_reason = "operator next" if k == "r" else "operator quit"
@@ -215,7 +224,11 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     finally:
         stop.set()
         thread.join(timeout=2)
+        cams.set_sink(None)
+        recorder.event("end", reason=end_reason)
+        log_dir = getattr(arms, "log_dir", None)
         out = recorder.close(
+            worker_logs=sorted(Path(log_dir).glob("worker_*.log")) if log_dir else None,
             end_reason=end_reason,
             duration_s=time.monotonic() - t_start,
             policy_steps=stats["policy_steps"],
@@ -223,6 +236,8 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             safety_rate_limited=safety.rate_limited,
         )
         print(f"  episode ended: {end_reason}\n  recorded -> {out}")
+        if out is not None and out.parent.name == "quarantine":
+            print("  !! recording incomplete -> quarantined, see quarantine_reason.json")
     if end_reason.startswith(("control loop", "policy thread")) or end_reason in (
         "ctrl-c",
         "operator quit",
@@ -275,6 +290,38 @@ def install_stop_signals() -> None:
 
     signal.signal(signal.SIGINT, handler)
     signal.signal(signal.SIGTERM, handler)
+
+
+def build_run_meta(args) -> dict:
+    """Facts needed to reproduce a recording: model checksum, code version, config files."""
+    import hashlib
+    import platform
+    import subprocess
+
+    meta: dict = {"host": platform.node()}
+    try:
+        h = hashlib.sha256()
+        with open(args.ckpt, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        meta["ckpt_sha256"] = h.hexdigest()
+    except OSError as exc:
+        meta["ckpt_sha256"] = f"unavailable: {exc}"
+    root = Path(__file__).resolve().parents[1]
+    try:
+        out = subprocess.run(["git", "-C", str(root), "describe", "--always", "--dirty"],
+                             capture_output=True, text=True, timeout=5)
+        meta["code_version"] = out.stdout.strip() or "unknown (no git checkout)"
+    except (OSError, subprocess.TimeoutExpired):
+        meta["code_version"] = "unknown"
+    configs = {}
+    for path in (args.hw_config, args.run_config):
+        try:
+            configs[str(path)] = Path(path).read_text()
+        except OSError as exc:
+            configs[str(path)] = f"unreadable: {exc}"
+    meta["configs"] = configs
+    return meta
 
 
 def load_max_seconds(run_config: Path) -> float:
@@ -398,6 +445,7 @@ def main() -> None:
 
         policy = Policy(args.ckpt, args.device, jpeg_roundtrip=not args.no_jpeg_roundtrip)
     info = policy.info()
+    run_meta = build_run_meta(args)
     print(
         f"policy: tasks={info['tasks']} chunk={info['chunk_size']} fps={info['fps']} device={info['device']}"
     )
@@ -444,7 +492,7 @@ def main() -> None:
         while (
             True
         ):  # between episodes the heartbeat keeps re-sending the last target (no lease timeout)
-            if run_episode(args, policy, cams, arms, keys, ep) == "quit":
+            if run_episode(args, policy, cams, arms, keys, ep, run_meta) == "quit":
                 break
             ep += 1
             print("reset the scene. moving back to the start pose ...")

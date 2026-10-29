@@ -1,0 +1,24 @@
+
+Ê
+nmx_msg/Joint.protonmx.msg"O
+JointCmd
+name (	
+pos (
+vel (
+acc (
+effort ("Q
+
+JointState
+name (	
+pos (
+vel (
+acc (
+effort (bproto3
+À
+nmx_msg/Hand.protonmx.msgnmx_msg/Joint.proto":
+HandCmd!
+joints (2.nmx.msg.JointCmd
+opts (	"H
+	HandState#
+joints (2.nmx.msg.JointState
+target_reached (bproto3

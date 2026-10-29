@@ -111,7 +111,7 @@ flowchart TB
 |---|---|
 | 启动 → 对齐 → 回车运行 → r / q | 全流程不报错 |
 | `latency` | 机器人 GPU 约 15 ms；用户电脑 CPU 约 150–250 ms |
-| 记录目录 | `meta.json / policy.npz / command.npz / frames.mp4` |
+| 记录目录 | `data/*.mcap、policy.npz、command.npz、events.jsonl、episode_stats.json、meta.json`；`episode_stats.json` 里 `dropped_camera_frames` = 0、`writer_error` = null |
 
 ![离线演练复盘](img/dryrun_review.png)
 
@@ -123,9 +123,21 @@ flowchart TB
 
 | 输出 | 内容 |
 |---|---|
-| 终端 JSON | 结束原因、策略频率、延迟 p50/p95、安全层修改比例、右臂跟踪误差 |
-| `review.png` | 14 个关节：红 = 模型目标，绿虚线 = 实际下发，蓝 = 从臂实际 |
-| `review.mp4` | 模型看到的画面 + 预测的右夹爪曲线 |
+| 终端 JSON | 结束原因、策略频率、延迟 p50/p95、安全层修改比例、右臂跟踪误差；新格式另有丢帧数、写盘错误、图像年龄、各相机帧数 |
+| `review.png` | 14 个关节：红 = 模型目标，绿虚线 = 实际下发，蓝 = 从臂实际；延迟、推理间隔、图像年龄 |
+| `review.mp4` | 新格式：两路相机**按真实速度**播放（30 fps），被模型用到的那一帧加绿框，下方是当时最新计划的右夹爪曲线；旧格式：模型输入画面 |
+
+```bash
+# 离线重跑模型，验证录制能复现网络输出（机器人上用 --device cuda 和现场一致）
+.venv/bin/python -m yam_infer.tools.replay_policy runs_infer/<目录> --ckpt models/act_v2_all.pt
+# 推理录制本身也是 NEDF3，可以直接当离线演练的输入
+.venv/bin/python -m yam_infer.run --ckpt models/act_v2_all.pt --task put_banana_in_bowl --dry-run runs_infer/<目录>
+```
+
+| 目录 | 含义 |
+|---|---|
+| `runs_infer/<时间>_<任务>/` | 完整回合 |
+| `runs_infer/quarantine/` | 不完整的回合（缺数据、写盘出错、程序中途崩溃），原因见 `quarantine_reason.json` |
 
 | 现象 | 看哪里 | 可能原因 / 处理 |
 |---|---|---|

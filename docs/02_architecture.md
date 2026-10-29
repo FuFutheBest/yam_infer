@@ -41,10 +41,13 @@ yam_infer/
     │       ├── config.py         hardware.yaml 解析与校验（与 SI 逐字节一致）
     │       └── endpoints.py      i2rt SDK → 7 维接口；FakeFollowerEndpoint
     ├── data/                 读写数据
-    │   ├── recorder.py         每回合记录
-    │   └── nedf3.py            读采集的 MCAP 录制（离线演练）
+    │   ├── recorder.py         每回合录制（原始流 + 网络输入输出 + 事件）
+    │   ├── nedf3_writer.py     写 NEDF3 兼容 MCAP
+    │   ├── nedf3_schemas/      NEDF3 的 protobuf 定义（从 SI 录制提取）
+    │   └── nedf3.py            读 NEDF3 录制（SI 采集 / 本项目录制）
     └── tools/                独立小工具
-        ├── review.py           复盘
+        ├── review.py           复盘（新旧两种录制格式）
+        ├── replay_policy.py    用录制离线重跑模型、对比输出
         ├── free_hw.py          谁占着 CAN/相机/端口 → 交互式停止
         ├── home_arms.py        任何状态下把手臂归位再断电
         └── export.py           训练 ckpt → 部署模型
@@ -221,24 +224,61 @@ flowchart LR
 | `RealSenseCamera` / `CameraRig` | 后台线程取帧，只保留最新；`grab()` 返回每路画面 + 到达时间；拒绝超过 0.2 s 的旧帧 |
 | `ReplayCameraRig` | 离线演练：按时间回放录制画面 |
 
-### `data/`
+### `data/`：录制
 
-`recorder.py` 每回合写一个目录 `runs_infer/<时间>_<任务>/`：
+| 文件 | 作用 |
+|---|---|
+| `recorder.py` | 每回合录制：原始流 + 网络输入输出 + 事件；结束时检查完整性 |
+| `nedf3_writer.py` | 写 NEDF3 兼容 MCAP（和 SI 采集同样的话题和 protobuf 定义）；`encode_jpeg_rgb` 是录制和模型预处理共用的 JPEG 编码 |
+| `nedf3_schemas/*.desc` | 从 SI 录制里提取的 protobuf 定义（`scripts/extract_nedf3_schemas.py`），不需要 SI 的私有包 |
+| `nedf3.py` | 读 NEDF3 录制：SI 的采集数据和本项目的推理录制都能读（`--dry-run` 可以直接回放推理录制） |
 
-| 文件 | 频率 | 内容 |
-|---|---|---|
-| `meta.json` | — | 模型信息、全部参数、结束原因、时长、安全层触发次数 |
-| `policy.npz` | 每次推理 | `t`（观测时刻 = 图像到达时间平均）、`qpos`（该时刻插值出的关节）、`chunk (50×14)`（从 `t` 开始）、`latency_ms`、`t_infer`（开始推理时刻）、`cam_t`（每路图像到达时间，顺序同 `meta.policy.cameras`） |
-| `command.npz` | 100 Hz | `t`、`target_raw`、`target_safe`、`qpos` |
-| `frames.mp4` | 每次推理 | 模型实际看到的图像（右 \| 左） |
+#### 一个回合目录（`runs_infer/<时间>_<任务>/`，录制中名为 `…_inprogress`）
 
-`nedf3.py` 读 SI 采集格式（MCAP）的录制，只给 `--dry-run` 用。
+录制窗口：从按回车开始，到本回合结束。回合前后的对齐、复位、停车动作不录。
+
+```mermaid
+flowchart LR
+    subgraph SRC["数据来源"]
+        CAM["相机线程<br/>每一帧"]
+        CTRL["控制循环<br/>每次读关节 + 下发"]
+        POL["策略线程<br/>每次推理"]
+    end
+    CAM -->|"队列（最多 120 帧，满了丢弃并计数）"| WT["写盘线程<br/>JPEG q90 编码 + 写 MCAP"]
+    CTRL --> WT
+    WT --> MC["① data/*.mcap 原始流"]
+    CTRL --> CN["command.npz"]
+    POL --> PN["② policy.npz 网络输入输出<br/>图像只存帧号"]
+    PN -. "cam_seq 指向" .-> MC
+```
+
+| 文件 | 内容 |
+|---|---|
+| `metadata.json` | NEDF3 元数据：任务、相机映射（camera_0 = 右腕，camera_1 = 左腕）、14 维布局 |
+| `data/*.mcap` ① | **原始流**，话题与 SI 采集一致：`nmx/hal/camera/camera_0\|1/rgbd`（每一帧，JPEG q90；`header.seq` = 帧号，`header.stamp` = RealSense 硬件时间 ns，`frame_id` = 相机名）；`nmx/hal/i2rt/follower/{left,right}/joint` 和 `/hand_state`（每次读数，约 100 Hz）。没有主臂话题 |
+| `policy.npz` ② | 每次推理一行：`t`（观测时刻 = 两路图像到达时间平均）、`cam_t` / `cam_seq`（所用每路图像的到达时间和帧号）、`qpos`（`t` 时刻插值出的关节 = 模型输入）、`raw_out`（网络原始输出，归一化值；`--remote` 时为 NaN）、`chunk`（50 步绝对目标，第 k 步在 `t + k/30`）、`t_infer` / `t_done` / `latency_ms` |
+| `command.npz` | 100 Hz：`t`（读完关节的时刻）、`qpos`、`target_raw`（模型目标）、`target_safe`（实际下发）、`t_sample`（左/右 worker 的采样时刻） |
+| `events.jsonl` | start / pause / resume / end（原因），每条带单调时间和墙钟时间 |
+| `episode_stats.json` | 各话题条数、丢弃帧数、写盘错误、图像年龄（中位 / 最大） |
+| `meta.json` | 模型路径与 sha256、代码版本（git）、全部参数、`hardware.yaml` / `run.yaml` 原文、时钟对应关系、结束原因、安全层统计 |
+| `worker_*.log` | worker 日志副本（不会再被下一次运行覆盖） |
+
+| 设计点 | 说明 |
+|---|---|
+| 模型输入图不另存 | 推理时的 JPEG 往返和录制用的是同一个编码函数，所以「录下的 JPEG 解码」就等于模型看到的图（缩放前）。`tools/replay_policy.py` 用帧号取回、缩放后重跑模型，CPU 上与现场输出的差 < 1e-6 |
+| 时间 | npz / jsonl 里都是单调时钟秒；MCAP `log_time` = 墙钟 ns，由单调时钟加上开始时测的一个固定偏移换算，中途系统校时不会跳变（`meta.json` 的 `clock`） |
+| 不拖慢控制 | 相机帧和关节都只是入队，JPEG 编码和写盘在独立线程 |
+| 完整性 | 结束时任一话题为空或写盘出错 → 移到 `runs_infer/quarantine/` 并写 `quarantine_reason.json`；程序崩溃留下的 `…_inprogress` 下次启动时移入 `quarantine/`（`…_interrupted`）；没按回车就退出的回合不留目录 |
+| 与 SI 的差别 | 同一套 schema，但 `header.seq/stamp` 有值（SI 为 0）、夹爪 100 Hz（SI 30 Hz）、在数据产生处直接录（SI 是轮询共享内存）、没有主臂 |
+
+旧格式（`frames.mp4`，10-28 及以前的记录）仍可用 `review.py` 打开。
 
 ### `tools/`
 
 | 文件 | 作用 |
 |---|---|
-| `review.py` | 健康摘要 + `review.png`（每个关节目标/下发/实际），`--video` 生成 `review.mp4` |
+| `review.py` | 健康摘要 + `review.png`（每个关节目标/下发/实际、延迟、图像年龄），`--video` 生成 `review.mp4`；新旧录制格式都支持 |
+| `replay_policy.py` | 按 `policy.npz` 的帧号从 MCAP 取回图像，用记录的关节离线重跑模型，打印与现场输出的最大差 |
 | `free_hw.py` | 按真实占用（CAN socket、RPC 端口监听/连接、RealSense 设备、CAN 口状态）找出阻止开机械臂的程序，按所属程序分组，交互式停止；需要时用 sudo |
 | `home_arms.py` | 任何 worker 状态下归位：能用现有 worker 就用 RPC；否则调 `free_hw` 释放后起本项目 worker；最后在休息姿态断电 |
 | `export.py` | 训练 ckpt 去掉优化器状态 → 部署 `.pt` |

@@ -84,6 +84,7 @@ class RemotePolicy:
         self._info["device"] = f"remote {address} ({self._info['device']})"
         self.jpeg_roundtrip = jpeg_roundtrip
         self.cameras = self._info["cameras"]
+        self.last_raw = None  # the server does not send the normalised output
         self.image_size = tuple(self._info["image_size"])
         self.fps = float(self._info["fps"])
         self.chunk_size = int(self._info["chunk_size"])

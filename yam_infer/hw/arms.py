@@ -212,7 +212,7 @@ class FollowerArms:
         with self._rpc_lock:
             futures = {s: self.clients[s].get_sample() for s in SIDES}
             results = {s: futures[s].result(timeout=self.timeout) for s in SIDES}
-        parts = []
+        parts, sampled = [], []
         for s in SIDES:
             r = results[s]
             if not isinstance(r, dict):
@@ -220,6 +220,9 @@ class FollowerArms:
             if r.get("phase") == "FAULT":
                 raise RuntimeError(f"{s} follower FAULT: {r.get('fault_reason')}")
             parts.append(np.asarray(r["state"], dtype=np.float64).reshape(7))
+            # worker's CLOCK_MONOTONIC = our time.monotonic() -> directly comparable
+            sampled.append(int(r.get("sampled_at_ns", 0)) / 1e9)
+        self.last_sample_t = np.asarray(sampled)
         return np.concatenate(parts)
 
     def begin(self) -> None:
@@ -335,12 +338,14 @@ class SimArms:
         self.target = self.state.copy()
         self.t = time.monotonic()
         self.session: str | None = None
+        self.last_sample_t = np.full(2, self.t)
 
     def get_state(self) -> np.ndarray:
         now = time.monotonic()
         a = 1 - np.exp(-(now - self.t) / 0.13)
         self.state += (self.target - self.state) * a
         self.t = now
+        self.last_sample_t = np.full(2, now)
         return self.state.copy()
 
     def begin(self) -> None:

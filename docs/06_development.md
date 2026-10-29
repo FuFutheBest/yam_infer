@@ -29,6 +29,7 @@ flowchart LR
 | `tests/test_arms_fake_worker.py` | `FollowerArms` ↔ 真实 worker 进程（`--fake`）：启动、阶段切换、心跳保活、关闭；端口被占时拒绝 | 无（自动选空闲端口） |
 | `tests/test_scheduler.py` | chunk 调度、交叉淡化、安全过滤（范围/速度） | 无 |
 | `tests/test_state_history.py` | 图像↔关节对齐：按时间插值、超范围取边界、只保留 1 s、时间递增 | 无 |
+| `tests/test_recorder.py` | 录制：我们的 NEDF3 读取器能读、JPEG 与模型预处理逐字节一致、帧号引用、缺数据进 quarantine、空回合不留目录、崩溃回合下次启动被隔离 | 无 |
 | `tests/test_tools.py` | `free_hw` 识别占用端口的 worker、解析 `python -u -m …`；`home_arms` 在「没有 worker」「有残留 worker」两种状态下都能归位且不留进程 | 无 |
 
 新功能请顺手加测试；涉及硬件的部分用 `FakeFollowerEndpoint` / `--fake` 模拟。
@@ -46,7 +47,7 @@ flowchart LR
 | 看门狗参数 | `configs/hardware.yaml` 的 `control:` | 改小租约前确认心跳间隔（30 ms） |
 | CAN 口 / 相机换了 | `configs/hardware.yaml` | |
 | worker 行为 | `hw/follower/` | 改了要在 `VENDORED.md` 记录本地改动；`runtime.py` / `config.py` 尽量保持与 SI 一致 |
-| 记录更多数据 | `data/recorder.py` + `tools/review.py` | |
+| 记录更多数据 | `data/recorder.py`（npz 字段）或 `data/nedf3_writer.py`（MCAP 话题）+ `tools/review.py` | 改了 MCAP 话题要保证 `data/nedf3.py` 仍能读；SI 若改 schema，用 `scripts/extract_nedf3_schemas.py` 重新提取 |
 
 ## 4. 上游更新
 

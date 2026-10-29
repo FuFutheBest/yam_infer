@@ -69,7 +69,7 @@ flowchart LR
 | `yam_infer/hw/arms.py` | 启动并驱动两个 worker；模拟臂 |
 | `yam_infer/hw/follower/` | worker 进程：看门狗 + i2rt SDK（从 SI 搬来） |
 | `yam_infer/hw/cameras.py` | D405；录制回放 |
-| `yam_infer/data/` | 每回合记录；读 MCAP 录制 |
-| `yam_infer/tools/` | `review` 复盘、`free_hw` 释放硬件、`home_arms` 归位、`export` 导出 |
+| `yam_infer/data/` | 每回合录制（NEDF3 兼容原始流 + 网络输入输出）；读 NEDF3 录制 |
+| `yam_infer/tools/` | `review` 复盘、`replay_policy` 离线重跑模型、`free_hw` 释放硬件、`home_arms` 归位、`export` 导出 |
 | `third_party/i2rt/` | I2RT SDK（MIT，裁剪） |
 | `tests/` | 无硬件测试 |
