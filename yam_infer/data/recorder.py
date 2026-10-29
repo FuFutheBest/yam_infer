@@ -2,7 +2,10 @@
 
 runs_infer/<YYYYmmdd_HHMMSS>_<task>/
     meta.json        checkpoint, task, settings, safety counters, end reason
-    policy.npz       per policy step (≈30 Hz): t, qpos(14), chunk(K,14), latency_ms
+    policy.npz       per policy step: t (observation time = mean camera arrival time), qpos(14)
+                     (follower state interpolated AT t), chunk(K,14) (starts at t), latency_ms,
+                     t_infer (inference start), cam_t(n_cam) (arrival time of each camera frame,
+                     order = meta.policy.cameras); image age = t_infer - t
     command.npz      per command step (100 Hz): t, target_raw(14), target_safe(14), qpos(14)
     frames.mp4       model-input images (right | left side by side) at policy rate
 Review with:  python -m yam_infer.tools.review runs_infer/<run>
@@ -30,6 +33,8 @@ class RunRecorder:
             "qpos": [],
             "chunk": [],
             "latency_ms": [],
+            "t_infer": [],
+            "cam_t": [],
         }
         self.command: dict[str, list] = {
             "t": [],
@@ -57,8 +62,14 @@ class RunRecorder:
         chunk: np.ndarray,
         latency_ms: float,
         images: np.ndarray,
+        t_infer: float | None = None,
+        cam_t: list[float] | None = None,
     ):
         with self._lock:
+            self.policy["t_infer"].append(t if t_infer is None else t_infer)
+            self.policy["cam_t"].append(
+                np.full(len(images), t) if cam_t is None else np.asarray(cam_t, np.float64)
+            )
             self.policy["t"].append(t)
             self.policy["qpos"].append(np.asarray(qpos, np.float32))
             self.policy["chunk"].append(np.asarray(chunk, np.float32))

@@ -28,6 +28,7 @@ flowchart LR
 | `tests/test_follower_runtime.py` | worker 看门狗：会话/序号/时效、租约过期、反馈超时、跟随误差、I/O 卡死（移植自 SI） | 无 |
 | `tests/test_arms_fake_worker.py` | `FollowerArms` ↔ 真实 worker 进程（`--fake`）：启动、阶段切换、心跳保活、关闭；端口被占时拒绝 | 无（自动选空闲端口） |
 | `tests/test_scheduler.py` | chunk 调度、交叉淡化、安全过滤（范围/速度） | 无 |
+| `tests/test_state_history.py` | 图像↔关节对齐：按时间插值、超范围取边界、只保留 1 s、时间递增 | 无 |
 | `tests/test_tools.py` | `free_hw` 识别占用端口的 worker、解析 `python -u -m …`；`home_arms` 在「没有 worker」「有残留 worker」两种状态下都能归位且不留进程 | 无 |
 
 新功能请顺手加测试；涉及硬件的部分用 `FakeFollowerEndpoint` / `--fake` 模拟。

@@ -103,17 +103,17 @@ class CameraRig:
                 raise TimeoutError("cameras produced no frames")
             time.sleep(0.05)
 
-    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], float]:
-        """Latest frame of every camera; raises if one is older than max_age seconds."""
+    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, float]]:
+        """Latest frame of every camera + its arrival time (time.monotonic(), same clock as the
+        follower state history).  Raises if a frame is older than max_age seconds."""
         now = time.monotonic()
-        frames, oldest = {}, now
+        frames, times = {}, {}
         for name, cam in self.cams.items():
             t, f = cam.latest()
             if f is None or now - t > max_age:
                 raise RuntimeError(f"camera {name} stale ({now - t:.2f}s)")
-            frames[name] = f
-            oldest = min(oldest, t)
-        return frames, oldest
+            frames[name], times[name] = f, t
+        return frames, times
 
     def close(self) -> None:
         for c in self.cams.values():
@@ -135,9 +135,10 @@ class ReplayCameraRig:
     def wait_ready(self, timeout: float = 0) -> None:
         self.t0 = time.monotonic()
 
-    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], float]:
+    def grab(self, max_age: float = 0.2) -> tuple[dict[str, np.ndarray], dict[str, float]]:
         i = min(int((time.monotonic() - self.t0) * 30), self.n - 1)
-        return {k: self._decode(v[i]) for k, v in self.frames.items()}, time.monotonic()
+        t = self.t0 + i / 30.0  # replayed frame "arrived" at its slot on the 30 Hz grid
+        return {k: self._decode(v[i]) for k, v in self.frames.items()}, dict.fromkeys(self.frames, t)
 
     def close(self) -> None:
         pass

@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from yam_infer.control.scheduler import ActionScheduler, SafetyFilter
+from yam_infer.control.state_history import StateHistory
 from yam_infer.data.recorder import RunRecorder
 from yam_infer.hw.arms import DEFAULT_HW_CONFIG, FollowerArms
 
@@ -99,9 +100,11 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
     )
     stop = threading.Event()
     paused = threading.Event()
-    state_lock = threading.Lock()
-    shared: dict = {"qpos": arms.get_state(), "error": None}
+    shared: dict = {"error": None}
     stats = {"policy_steps": 0}
+    # follower states of the last ~1 s (written by the control loop) -> the joints are taken AT the
+    # image time, as in training (see control/state_history.py)
+    history = StateHistory(seconds=1.0, rate_hz=CONTROL_HZ)
 
     def policy_loop():
         period = 1.0 / policy.fps
@@ -109,14 +112,24 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
         while not stop.is_set():
             try:
                 if not paused.is_set() and scheduler.needs_new_chunk(time.monotonic()):
-                    frames, _t_cam = cams.grab()
-                    with state_lock:
-                        qpos = shared["qpos"].copy()
-                    t_obs = time.monotonic()
+                    frames, cam_t = cams.grab()
+                    t_img = float(np.mean(list(cam_t.values())))  # observation time
+                    qpos = history.at(t_img)  # joints at that moment (interpolated)
+                    t_infer = time.monotonic()
                     chunk, images = policy.predict(frames, qpos, args.task)
-                    latency = (time.monotonic() - t_obs) * 1000
-                    scheduler.add(t_obs, chunk)
-                    recorder.log_policy(t_obs, qpos, chunk, latency, images)
+                    latency = (time.monotonic() - t_infer) * 1000
+                    # the chunk starts at the observation time (training: actions a(t)...a(t+49)
+                    # for the sample at t), so image age + inference latency are skipped over
+                    scheduler.add(t_img, chunk)
+                    recorder.log_policy(
+                        t_img,
+                        qpos,
+                        chunk,
+                        latency,
+                        images,
+                        t_infer=t_infer,
+                        cam_t=[cam_t[c] for c in policy.cameras],
+                    )
                     stats["policy_steps"] += 1
                     if (
                         stats["policy_steps"]
@@ -148,6 +161,7 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
             break
 
     hold = arms.get_state()
+    history.add(time.monotonic(), hold)
     safety.reset(hold)
     thread = threading.Thread(target=policy_loop, daemon=True)
     thread.start()
@@ -160,8 +174,7 @@ def run_episode(args, policy, cams, arms, keys: KeyReader, ep_index: int) -> str
         while not stop.is_set():
             now = time.monotonic()
             qpos = arms.get_state()
-            with state_lock:
-                shared["qpos"] = qpos
+            history.add(time.monotonic(), qpos)  # stamped after the read, like SI's recorder
             raw = None if paused.is_set() else scheduler.target_at(now)
             target = last_target if raw is None else raw
             if args.freeze_left:

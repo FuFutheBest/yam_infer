@@ -30,7 +30,8 @@ yam_infer/
     │   ├── act.py              ACT 网络结构（与训练端一致）
     │   └── server.py           可选：远程 GPU 推理服务
     ├── control/              「小脑」：动作怎么执行
-    │   └── scheduler.py        chunk 调度 + 安全过滤
+    │   ├── scheduler.py        chunk 调度 + 安全过滤
+    │   └── state_history.py    最近 1 s 的关节记录：按图像时间插值关节（图像↔关节对齐）
     ├── hw/                   硬件
     │   ├── arms.py             主进程侧：启动/驱动两个 worker；模拟臂 SimArms
     │   ├── cameras.py          D405 相机；录制回放
@@ -62,13 +63,15 @@ yam_infer/
 flowchart TB
     subgraph MAIN["主进程 yam_infer.run（.venv/bin/python）"]
         KEY["按键线程"]
-        CAM["相机线程 ×2<br/>只保留最新一帧"]
-        POL["策略线程 ≤30 Hz<br/>需要新 chunk 时才推理（GPU）"]
+        CAM["相机线程 ×2<br/>只保留最新一帧 + 到达时间"]
+        HIST[("StateHistory<br/>最近 1 s 关节")]
+        POL["策略线程 ≤30 Hz<br/>需要新 chunk 时才推理（GPU）<br/>关节取图像时刻的插值"]
         SCH[("ActionScheduler")]
         CTRL["控制循环 100 Hz（主线程）<br/>插值 → 左臂冻结 → 安全过滤 → 下发"]
         HB["心跳线程<br/>>30 ms 没下发就重发上一个目标"]
         REC["RunRecorder"]
         CAM --> POL --> SCH --> CTRL
+        CTRL -->|"每 10 ms 写入"| HIST -->|"at(t_img)"| POL
         KEY --> CTRL
         POL & CTRL --> REC
         CTRL --> HB
@@ -112,13 +115,45 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-    A["读从臂状态 qpos"] --> B["scheduler.target_at(now)"]
+    A["读从臂状态 qpos<br/>写入 StateHistory"] --> B["scheduler.target_at(now)"]
     B --> C["左臂 0–6 维<br/>替换为开始时姿态"]
     C --> D["SafetyFilter<br/>范围 → 速度"]
     D --> E["arms.submit(…, ACTIVE)"]
     E --> F["recorder 记录"]
     F --> G["检查按键 / 超时"]
 ```
+
+### 图像与关节的时间对齐（策略线程每次推理）
+
+模型的一个输入 = 两路图像 + 「拍到这张图那一刻」的关节。推理时按训练数据的配对方式重建这个组合：
+
+| | 训练数据（opus_inference_train 数据转换） | 推理（本项目） |
+|---|---|---|
+| 时间来源 | 录制时的本机时间：相机 = 程序拿到画面的时刻，关节 = 读完全部关节的时刻 | 同样的定义：相机 = 相机线程拿到画面的时刻，关节 = 控制循环读完的时刻（同一个 `time.monotonic()` 时钟） |
+| 配对 | 30 Hz 时间点 t：关节在 t 线性插值，图像取离 t 最近的一帧 | 观测时刻 `t_img` = 两路图像到达时间的平均；关节 = `StateHistory.at(t_img)`（相邻两次读数线性插值） |
+| 动作 | 样本 t 的标签是 a(t)…a(t+49) | 这次预测的 50 步从 `t_img` 开始排时间；图像年龄 + 推理延迟对应的前几步会被调度器自动跳过 |
+
+```mermaid
+sequenceDiagram
+    participant Cam as 相机线程 ×2
+    participant Ctrl as 控制循环 100 Hz
+    participant H as StateHistory（1 s）
+    participant Pol as 策略线程
+    Ctrl->>H: 每 10 ms：add(t, qpos)
+    Cam->>Cam: 新帧到达 → 记 (到达时间, 画面)
+    Pol->>Cam: grab() → 两路画面 + 各自到达时间
+    Pol->>Pol: t_img = 两路到达时间平均
+    Pol->>H: at(t_img) → 那一刻的关节
+    Pol->>Pol: 推理（图像 + 关节 + 任务）
+    Pol->>Pol: scheduler.add(t_img, 50 步动作)
+```
+
+| 仍然存在、无法消除的 | 说明 |
+|---|---|
+| 「到达时间」≠ 曝光时刻 | 训练数据也是到达时间（SI 故意不用 RealSense 硬件时间戳），两边一致 |
+| 左右相机不同步 | 两个 D405 各自出图，相差 0–33 ms；训练数据里同样存在，取平均作折中 |
+
+记录：`policy.npz` 的 `t` = `t_img`，`qpos` = 插值出的关节，`cam_t` = 每路图像到达时间，`t_infer` = 开始推理时刻（`t_infer - t` = 图像年龄）。
 
 ## 4. 模块逐个说明
 
@@ -138,6 +173,13 @@ flowchart LR
 |---|---|
 | `ActionScheduler` | 存最近的 chunk（带拍照时刻），`target_at(t)` 线性插值。`chunk` 模式执行 `horizon` 步才换，切换 0.1 s 交叉淡化；`ensemble` 模式加权平均 |
 | `SafetyFilter` | ① 关节限制在示范范围 ± margin、夹爪 0–1 ② 速度上限（关节 1.5 rad/s、夹爪 3 /s）；统计触发次数 |
+
+### `control/state_history.py`
+
+| 成员 | 作用 |
+|---|---|
+| `StateHistory.add(t, qpos)` | 控制循环每次读完关节写入；只保留最近 1 s（100 条），时间必须递增 |
+| `StateHistory.at(t)` | t 时刻的关节：两侧读数线性插值；超出范围取最早 / 最新一条 |
 
 ### `hw/arms.py`：主进程侧的从臂
 
@@ -176,7 +218,7 @@ flowchart LR
 | 成员 | 作用 |
 |---|---|
 | `resolve_serials()` | 序列号：命令行 > 环境变量 `YAM_{LEFT,RIGHT}_CAM_SERIAL` > `hardware.yaml` 的 `cameras:` |
-| `RealSenseCamera` / `CameraRig` | 后台线程取帧，只保留最新；`grab()` 拒绝超过 0.2 s 的旧帧 |
+| `RealSenseCamera` / `CameraRig` | 后台线程取帧，只保留最新；`grab()` 返回每路画面 + 到达时间；拒绝超过 0.2 s 的旧帧 |
 | `ReplayCameraRig` | 离线演练：按时间回放录制画面 |
 
 ### `data/`
@@ -186,7 +228,7 @@ flowchart LR
 | 文件 | 频率 | 内容 |
 |---|---|---|
 | `meta.json` | — | 模型信息、全部参数、结束原因、时长、安全层触发次数 |
-| `policy.npz` | 每次推理 | `t`、`qpos`、`chunk (50×14)`、`latency_ms` |
+| `policy.npz` | 每次推理 | `t`（观测时刻 = 图像到达时间平均）、`qpos`（该时刻插值出的关节）、`chunk (50×14)`（从 `t` 开始）、`latency_ms`、`t_infer`（开始推理时刻）、`cam_t`（每路图像到达时间，顺序同 `meta.policy.cameras`） |
 | `command.npz` | 100 Hz | `t`、`target_raw`、`target_safe`、`qpos` |
 | `frames.mp4` | 每次推理 | 模型实际看到的图像（右 \| 左） |
 
