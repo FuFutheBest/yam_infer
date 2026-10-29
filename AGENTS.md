@@ -11,6 +11,7 @@
 ## 分析依据
 
 - 数据采集项目：`~/Dev/MVIG/SuperInference-feat-i2rt_NEDF3/`（采集端，不能在用户机器运行）
+- 网络训练项目：`~/Dev/MVIG/yam_train/`
 - 用户的 prompt
 - **不要参考** `~/Dev/MVIG` 下和服务器上的其他尝试（dp / pi0 / pi0.5 / act 等目录），独立分析决定方案。
 
