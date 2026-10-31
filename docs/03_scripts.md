@@ -212,3 +212,32 @@ python -m yam_infer.policy.server --ckpt models/act_v2_all.pt --host <局域网 
 # 机器人
 bash scripts/run_robot.sh --remote <GPU 机 IP>:5555
 ```
+
+## 10. pi0.5 模型（`format: pi05`，`pi05` 分支）
+
+pi0.5 有 3.3B 参数，用 JAX 写成，依赖由 openpi 固定（jax 0.5.3、numpy<2 等），和本项目的环境（numpy 2.2.6）装不到一起。所以网络跑在一个独立的**策略服务**进程里，`yam_infer.run` 只是客户端。这也是 openpi 官方的部署方式。
+
+```mermaid
+flowchart LR
+    subgraph GPU["GPU 机（机器人本机或训练服务器）"]
+        S["openpi 环境<br/>python -m yam_train.pi05.cli serve --model DIR --port 8000"]
+    end
+    subgraph R["机器人"]
+        Y["yam_infer.run<br/>models.yaml: format pi05, server host:8000"]
+    end
+    Y <-->|"websocket（msgpack）<br/>2×224×224 图 + 状态 + 指令 → 50×14 绝对目标"| S
+```
+
+| 步骤 | 命令 / 配置 |
+|---|---|
+| 1. 启动服务（先启动，加载约 1 分钟） | `source scripts/pi05_env.sh && $PI05_PY -m yam_train.pi05.cli serve --model models/pi05_yam --port 8000`（yam_train `pi05` 分支） |
+| 2. `configs/models.yaml` | 启用文件末尾的 pi05 块：`server: 127.0.0.1:8000`、`format: pi05`、`task: …`、`action_mode: delta` |
+| 3. `configs/run.yaml` | `mode: chunk`、`horizon: 25`、`blend_s: 0.1`、`freeze_left: true` |
+| 4. 运行 | `bash scripts/run_robot.sh`。也可以临时用 `--server host:port` 或 `--task` 覆盖 models.yaml |
+
+- 一个模型同时会两个任务，`task` 决定发给模型的英文指令。
+- 起始姿态、动作范围（安全过滤用）、fps 和相机列表都由服务在连接时发过来。
+- 图像预处理和训练完全一致：先做 JPEG q90 往返（用录制器的编码器），再用 `resize_with_pad` 缩放到 224×224（PIL 双线性，等比缩放后上下补黑边）。
+- 依赖：`websockets`、`pillow`（已写入 requirements.txt）。
+- 已验证：在用户电脑上用 `--dry-run` 回放录制数据，经 SSH 隧道连到服务器上的策略服务（训练 1000 步的模型，CPU 推理），整条链路正常。
+- **未验证**：机器人 RTX 5090（Blackwell）上能否直接运行 JAX 0.5.3。如果报 `ptxas too old`，可以换新版 `nvidia-cuda-nvcc-cu12`（≥12.8），或者改把服务放到训练服务器上跑，用 SSH 隧道连接。

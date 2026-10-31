@@ -26,13 +26,20 @@ def test_models_config_pi05(tmp_path: Path) -> None:
     f = tmp_path / "models.yaml"
     f.write_text(PI05)
     m = load_model_config(f)
-    assert (m.format, m.server, m.ckpt, m.task) == ("pi05", "127.0.0.1:8000", None, "put_block_in_bowl")
+    assert (m.format, m.server, m.ckpt, m.task) == (
+        "pi05",
+        "127.0.0.1:8000",
+        None,
+        "put_block_in_bowl",
+    )
     check_model_matches(m, FORMAT, ["put_block_in_bowl", "x"], "delta")
     with pytest.raises(ValueError, match="format"):
         check_model_matches(m, "yam_train/act_ref-v1", ["put_block_in_bowl"], "delta")
-    for body, msg in ((PI05.replace("127.0.0.1:8000", "nohost"), "host:port"),
-                      (PI05 + "  ckpt: m.pt\n", "unknown key"),
-                      (PI05.replace("  server: 127.0.0.1:8000\n", ""), "model.server is required")):
+    for body, msg in (
+        (PI05.replace("127.0.0.1:8000", "nohost"), "host:port"),
+        (PI05 + "  ckpt: m.pt\n", "unknown key"),
+        (PI05.replace("  server: 127.0.0.1:8000\n", ""), "model.server is required"),
+    ):
         f.write_text(body)
         with pytest.raises(ValueError, match=msg):
             load_model_config(f)
@@ -42,9 +49,11 @@ def test_commented_pi05_block_is_valid(tmp_path: Path) -> None:
     from yam_infer.config import DEFAULT_MODELS_CONFIG
 
     lines = DEFAULT_MODELS_CONFIG.read_text().splitlines()
-    start = lines.index("# ---- yam_train pi05 model (one model, both tasks; runs in a policy server) ----")
+    start = lines.index(
+        "# ---- yam_train pi05 model (one model, both tasks; runs in a policy server) ----"
+    )
     block = []
-    for ln in lines[start + 1:]:
+    for ln in lines[start + 1 :]:
         if not ln.startswith("# ") or ln.startswith("# ----"):
             break
         block.append(ln[2:])
@@ -96,7 +105,10 @@ def fake_server():
             if obs["prompt"] == "boom":
                 ws.send("Traceback: boom")
                 return
-            actions = np.tile(obs["state"].astype(np.float32), (50, 1)) + np.arange(50, dtype=np.float32)[:, None]
+            actions = (
+                np.tile(obs["state"].astype(np.float32), (50, 1))
+                + np.arange(50, dtype=np.float32)[:, None]
+            )
             ws.send(_pack({"actions": actions, "policy_timing": {"infer_ms": 12.0}}))
 
     with serve(handler, "127.0.0.1", 0) as server:
@@ -111,7 +123,12 @@ def test_client_against_fake_server(fake_server) -> None:
     address, seen = fake_server
     pol = Pi05Policy(address, connect_timeout_s=5)
     assert (pol.format, pol.tasks, pol.chunk_size, pol.fps, pol.image_size) == (
-        FORMAT, ["put_block_in_bowl"], 50, 30.0, (224, 224))
+        FORMAT,
+        ["put_block_in_bowl"],
+        50,
+        30.0,
+        (224, 224),
+    )
     assert pol.info()["start_pose"]["put_block_in_bowl"] == [0.0] * 14
     frames = {c: np.full((480, 640, 3), 100, np.uint8) for c in ("right_wrist", "left_wrist")}
     qpos = np.linspace(0, 1, 14)
@@ -120,7 +137,9 @@ def test_client_against_fake_server(fake_server) -> None:
     assert images.shape == (2, 224, 224, 3)
     obs = seen[-1]
     assert obs["prompt"] == "put the block in the bowl" and obs["state"].dtype == np.float32
-    assert set(obs["images"]) == {"right_wrist", "left_wrist"} and obs["images"]["left_wrist"].shape == (224, 224, 3)
+    assert set(obs["images"]) == {"right_wrist", "left_wrist"} and obs["images"][
+        "left_wrist"
+    ].shape == (224, 224, 3)
     assert pol.last_timing["infer_ms"] == 12.0
     with pytest.raises(ValueError, match="knows the tasks"):
         pol.predict(frames, qpos, "put_banana_in_bowl")

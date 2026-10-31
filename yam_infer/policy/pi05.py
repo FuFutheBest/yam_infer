@@ -38,7 +38,12 @@ def _pack_array(obj):
     if isinstance(obj, (np.ndarray, np.generic)) and obj.dtype.kind in ("V", "O", "c"):
         raise ValueError(f"Unsupported dtype: {obj.dtype}")
     if isinstance(obj, np.ndarray):
-        return {b"__ndarray__": True, b"data": obj.tobytes(), b"dtype": obj.dtype.str, b"shape": obj.shape}
+        return {
+            b"__ndarray__": True,
+            b"data": obj.tobytes(),
+            b"dtype": obj.dtype.str,
+            b"shape": obj.shape,
+        }
     if isinstance(obj, np.generic):
         return {b"__npgeneric__": True, b"data": obj.item(), b"dtype": obj.dtype.str}
     return obj
@@ -81,11 +86,16 @@ def resize_with_pad(rgb: np.ndarray, height: int, width: int) -> np.ndarray:
     resized_width = int(cur_width / ratio)
     resized = image.resize((resized_width, resized_height), resample=Image.Resampling.BILINEAR)
     canvas = Image.new(resized.mode, (width, height), 0)
-    canvas.paste(resized, (max(0, int((width - resized_width) / 2)), max(0, int((height - resized_height) / 2))))
+    canvas.paste(
+        resized,
+        (max(0, int((width - resized_width) / 2)), max(0, int((height - resized_height) / 2))),
+    )
     return np.asarray(canvas)
 
 
-def preprocess_frame_pi05(rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True) -> np.ndarray:
+def preprocess_frame_pi05(
+    rgb: np.ndarray, size_hw: tuple[int, int], jpeg_roundtrip: bool = True
+) -> np.ndarray:
     """D405 RGB uint8 (480,640,3) -> model image uint8 (224,224,3), exactly like yam_train.pi05.to_lerobot."""
     if jpeg_roundtrip:  # the training frames are the recorder's JPEGs, decoded with OpenCV
         decoded = cv2.imdecode(np.frombuffer(encode_jpeg_rgb(rgb), np.uint8), cv2.IMREAD_COLOR)
@@ -105,14 +115,18 @@ class Pi05Policy:
         deadline = time.monotonic() + connect_timeout_s
         while True:  # the server needs ~1 min to load the model after start
             try:
-                conn = websockets.sync.client.connect(uri, compression=None, max_size=None, open_timeout=10)
+                conn = websockets.sync.client.connect(
+                    uri, compression=None, max_size=None, open_timeout=10
+                )
                 break
             except (ConnectionRefusedError, TimeoutError, OSError) as exc:
                 if time.monotonic() > deadline:
                     raise ConnectionError(f"no pi05 policy server at {uri}: {exc}") from exc
                 print(f"waiting for the pi05 policy server at {uri} ...", flush=True)
                 time.sleep(3)
-        self._stack = contextlib.ExitStack()  # websockets wants the connection used as a context manager
+        self._stack = (
+            contextlib.ExitStack()
+        )  # websockets wants the connection used as a context manager
         self._ws = self._stack.enter_context(conn)
         first = self._ws.recv()
         if isinstance(first, str):
@@ -156,12 +170,18 @@ class Pi05Policy:
             "start_pose": {k: v.tolist() for k, v in self.start_pose.items()},
             "action_min": self.a_min.tolist(),
             "action_max": self.a_max.tolist(),
-            "server_model": {k: self.meta.get(k) for k in ("config", "experiment", "step", "episodes")},
+            "server_model": {
+                k: self.meta.get(k) for k in ("config", "experiment", "step", "episodes")
+            },
         }
 
     def prepare(self, frames: dict[str, np.ndarray]) -> np.ndarray:
-        return np.stack([preprocess_frame_pi05(frames[c], self.image_size, self.jpeg_roundtrip)
-                         for c in self.cameras])
+        return np.stack(
+            [
+                preprocess_frame_pi05(frames[c], self.image_size, self.jpeg_roundtrip)
+                for c in self.cameras
+            ]
+        )
 
     def predict_prepared(self, images: np.ndarray, qpos: np.ndarray, task: str) -> np.ndarray:
         if task not in self.prompts:
@@ -178,7 +198,9 @@ class Pi05Policy:
         out = self._unpack(reply)
         actions = np.asarray(out["actions"], dtype=np.float64)
         if actions.ndim != 2 or actions.shape[1] != 14:
-            raise RuntimeError(f"pi05 server returned actions of shape {actions.shape}, expected (H, 14)")
+            raise RuntimeError(
+                f"pi05 server returned actions of shape {actions.shape}, expected (H, 14)"
+            )
         self.last_timing = {**out.get("policy_timing", {}), **out.get("server_timing", {})}
         return actions
 
