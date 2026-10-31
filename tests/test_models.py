@@ -16,14 +16,20 @@ from .fake_act_ref import make_act_ref_ckpt
 def test_project_models_config() -> None:
     m = load_model_config(DEFAULT_MODELS_CONFIG)
     assert (m.format, m.task, m.action_mode) == ("act_v2", "put_blue_block_in_blue_cup", "delta")
-    assert m.ckpt.is_absolute() and m.ckpt.name == "act_v2_all.pt"
+    assert m.ckpt is not None and m.ckpt.is_absolute() and m.ckpt.name == "act_v2_all.pt"
 
 
 def test_commented_act_ref_block_is_valid(tmp_path: Path) -> None:
     """Switching to the prepared act_ref block = uncomment it (and comment the old one)."""
     lines = DEFAULT_MODELS_CONFIG.read_text().splitlines()
     start = lines.index("# ---- new yam_train act_ref model (one task per file) ----")
-    act_ref = "\n".join(ln[2:] for ln in lines[start + 1 :] if ln.startswith("# "))
+    block = []
+    for ln in lines[start + 1 :]:
+        if ln.startswith("# ----"):  # next model block
+            break
+        if ln.startswith("# "):
+            block.append(ln[2:])
+    act_ref = "\n".join(block)
     f = tmp_path / "models.yaml"
     f.write_text(act_ref + "\n")
     m = load_model_config(f)

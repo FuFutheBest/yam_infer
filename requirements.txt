@@ -11,6 +11,8 @@ matplotlib              # only for yam_infer.tools.review
 mcap==1.6.0             # only for --dry-run (reads recorded episodes)
 mcap-protobuf-support==0.6.0
 protobuf
+websockets==15.0.1      # only for pi05 models: client of the openpi policy server
+pillow                  # pi05 image resize (same function as openpi); also pulled in by matplotlib
 
 # --- follower worker + vendored i2rt SDK (third_party/i2rt), runtime imports only
 python-can==4.5.0

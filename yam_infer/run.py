@@ -368,6 +368,11 @@ def main() -> None:
         default="",
         help="host:port of `python -m yam_infer.policy.server` (GPU elsewhere)",
     )
+    p.add_argument(
+        "--server",
+        default=None,
+        help="pi05 only, one-off: other policy server (host:port) than models.yaml",
+    )
     p.add_argument("--device", default="auto")
     p.add_argument("--no-jpeg-roundtrip", action="store_true")
     p.add_argument(
@@ -455,16 +460,24 @@ def main() -> None:
         model_cfg = load_model_config(args.models_config)
     except ValueError as exc:
         p.error(str(exc))
-    if args.ckpt is not None or args.task is not None:
+    is_pi05 = model_cfg.format == "pi05"
+    if is_pi05 and (args.ckpt is not None or args.remote):
+        p.error("pi05 models run in their policy server: use models.yaml server / --server")
+    if not is_pi05 and args.server is not None:
+        p.error("--server is for pi05 models (models.yaml format: pi05)")
+    if args.ckpt is not None or args.task is not None or args.server is not None:
         from dataclasses import replace
 
         model_cfg = replace(
             model_cfg,
             ckpt=Path(args.ckpt) if args.ckpt is not None else model_cfg.ckpt,
             task=args.task if args.task is not None else model_cfg.task,
+            server=args.server if args.server is not None else model_cfg.server,
         )
-    args.task, args.ckpt = model_cfg.task, str(model_cfg.ckpt)
-    if not args.remote and not Path(args.ckpt).is_file():
+    # pi05: no model file; recorded as pi05://host:port (the server's model is in policy info)
+    args.task = model_cfg.task
+    args.ckpt = f"pi05://{model_cfg.server}" if is_pi05 else str(model_cfg.ckpt)
+    if not is_pi05 and not args.remote and not Path(args.ckpt).is_file():
         p.error(f"model file not found: {args.ckpt} ({args.models_config})")
     ex = run_cfg["execution"]  # command line > run.yaml
     for arg, key in (
@@ -484,7 +497,11 @@ def main() -> None:
     args.compensate_action_shift = model_cfg.compensate_action_shift
     print(f"task: {args.task}  model: {args.ckpt}")
 
-    if args.remote:
+    if is_pi05:
+        from yam_infer.policy.pi05 import Pi05Policy
+
+        policy = Pi05Policy(model_cfg.server, jpeg_roundtrip=not args.no_jpeg_roundtrip)
+    elif args.remote:
         from yam_infer.policy.server import RemotePolicy
 
         policy = RemotePolicy(args.remote, jpeg_roundtrip=not args.no_jpeg_roundtrip)

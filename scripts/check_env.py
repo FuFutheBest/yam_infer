@@ -58,6 +58,8 @@ def _models() -> str:
     from yam_infer.policy.policy import Policy
 
     m = load_model_config()
+    if m.ckpt is None:  # pi05: the model lives in the policy server (checked when run starts)
+        return f"pi05 policy server {m.server}, task {m.task} (server not contacted here)"
     if not m.ckpt.is_file():
         raise FileNotFoundError(f"{m.ckpt} missing (copy it from the user PC)")
     pol = Policy(m.ckpt, "cpu")
