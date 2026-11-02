@@ -104,11 +104,25 @@ def test_ensure(tmp_path: Path, monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="exited"):
         PolicyServer.ensure(cfg, tmp_path / "logs", ready_timeout_s=60)
-    # something already listens on the port: use it, start nothing
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", port))
-        s.listen()
+    # a server already answers on the port (like openpi's /healthz): use it, start nothing
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Healthz(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A002 (base signature)
+            pass
+
+    httpd = HTTPServer(("127.0.0.1", port), Healthz)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
         assert PolicyServer.ensure(cfg, tmp_path) is None
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_find_openpi_python(tmp_path: Path) -> None:
@@ -124,7 +138,8 @@ def test_find_openpi_python(tmp_path: Path) -> None:
 
 def test_server_package_imports_only_openpi_and_itself() -> None:
     """yam_infer.pi05_server runs in the openpi venv: no imports of the rest of yam_infer."""
-    allowed = {"openpi", "numpy", "yam_infer.pi05_server"}
+    # openpi and its own dependencies (all in the openpi venv)
+    allowed = {"openpi", "numpy", "jax", "orbax", "flax", "yam_infer.pi05_server"}
     stdlib = set(sys.stdlib_module_names) | {"__future__"}
     for f in (PROJECT_ROOT / "yam_infer/pi05_server").glob("*.py"):
         for node in ast.walk(ast.parse(f.read_text())):

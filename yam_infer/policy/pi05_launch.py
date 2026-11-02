@@ -19,7 +19,6 @@ import atexit
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -41,12 +40,20 @@ def split_address(address: str) -> tuple[str, int]:
     return host, int(port)
 
 
-def port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+def port_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    """Something answers HTTP on the port.  Asks openpi's /healthz (200) instead of a bare TCP
+    connect, which the websocket server would log as a failed handshake; any HTTP reply counts."""
+    import http.client
+
+    conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
+        conn.request("GET", "/healthz")
+        conn.getresponse().read()
+        return True
+    except (OSError, http.client.HTTPException):
         return False
+    finally:
+        conn.close()
 
 
 def find_openpi_python(env: dict[str, str] | None = None) -> Path:
