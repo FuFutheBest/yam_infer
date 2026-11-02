@@ -1,8 +1,8 @@
 """pi0.5 models (yam_train pi05 branch): the network runs in openpi's own environment as a policy server,
 this process is the client.
 
-    model server (openpi venv, GPU):   python -m yam_train.pi05.cli serve --model models/pi05_yam --port 8000
-    robot:                             configs/models.yaml  format: pi05, server: <host>:8000
+    model server (openpi venv, GPU):   python -m yam_infer.pi05_server --model models/pi05_yam --port 8100  (run.py starts it: models.yaml model_dir)
+    robot:                             configs/models.yaml  format: pi05, server: <host>:8100
 
 Why a server: pi0.5 is a 3.3B-parameter JAX model with its own pinned dependencies (jax 0.5.3,
 numpy<2 ...) that cannot live in this project's environment (numpy 2.2.6 for i2rt).  This is openpi's own

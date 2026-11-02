@@ -43,7 +43,7 @@
 
 # ---- yam_train pi05 model (one model, both tasks; runs in a policy server) ----
 model:
-  server: 127.0.0.1:8000
+  server: 127.0.0.1:8100   # not 8000: cyy's openpi servers/clients use 8000
   model_dir: models/pi05_yam
   format: pi05
   task: put_block_in_bowl
@@ -63,7 +63,7 @@ model:
 #                start the server yourself (any machine):
 #                  PYTHONPATH=<this project> <openpi python>
 #                  -m yam_infer.pi05_server --model models/pi05_yam
-#                  --host 0.0.0.0 --port 8000
+#                  --host 0.0.0.0 --port 8100
 #   task         put_block_in_bowl | put_blue_block_in_blue_cup (one model; the task picks the prompt)
 #   action_mode  delta (the server already returns absolute targets; checked against the server)
 # run.yaml for pi05: execution {mode: chunk, horizon: 25, blend_s: 0.1} (plan = 50 steps = 1.7 s)

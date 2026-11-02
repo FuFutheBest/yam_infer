@@ -2,7 +2,7 @@
 # (openpi exists only in the openpi venv this module runs in, not in this project's .venv)
 """Serve an exported pi0.5 model with openpi's websocket policy server (openpi venv).
 
-    python -m yam_infer.pi05_server --model models/pi05_yam [--host 127.0.0.1] [--port 8000]
+    python -m yam_infer.pi05_server --model models/pi05_yam [--host 127.0.0.1] [--port 8100]
 
 Same as `yam_train.pi05.cli serve` (yam_train pi05 @54588b2): the openpi TrainConfig is rebuilt from
 the model's yam_model.json (only the parts serving uses: model shape, data transforms, norm stats),
@@ -109,7 +109,7 @@ def main() -> None:
         "--model", required=True, help="exported model directory (yam_model.json, params/, assets/)"
     )
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--port", type=int, default=8100)
     p.add_argument(
         "--restore-gb",
         type=int,

@@ -1,6 +1,6 @@
 """pi0.5 policy server (runs in the openpi virtualenv, NOT in this project's .venv).
 
-    $OPENPI_DIR/.venv/bin/python -m yam_infer.pi05_server --model models/pi05_yam --port 8000
+    $OPENPI_DIR/.venv/bin/python -m yam_infer.pi05_server --model models/pi05_yam --port 8100
 
 Normally you do not start it yourself: `yam_infer.run` (scripts/run_robot.sh) starts it when
 configs/models.yaml has a pi05 block with `model_dir:` and nothing listens on `server:` yet

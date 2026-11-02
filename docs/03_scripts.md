@@ -223,7 +223,7 @@ pi0.5 有 3.3B 参数，用 JAX 写成，依赖由 openpi 固定（jax 0.5.3、n
 flowchart LR
     RR["run_robot.sh"] --> Y
     subgraph R["机器人"]
-        Y["yam_infer.run（本项目 .venv）<br/>models.yaml: format pi05, server 127.0.0.1:8000, model_dir"]
+        Y["yam_infer.run（本项目 .venv）<br/>models.yaml: format pi05, server 127.0.0.1:8100, model_dir"]
         S["策略服务（openpi .venv，GPU）<br/>python -m yam_infer.pi05_server --model models/pi05_yam"]
     end
     Y -->|"端口无人监听 → 自动启动 / 退出时停止"| S
@@ -232,7 +232,7 @@ flowchart LR
 
 | 步骤 | 命令 / 配置 |
 |---|---|
-| 1. `configs/models.yaml` | pi05 块：`server: 127.0.0.1:8000`、`model_dir: models/pi05_yam`、`format: pi05`、`task: …`、`action_mode: delta` |
+| 1. `configs/models.yaml` | pi05 块：`server: 127.0.0.1:8100`、`model_dir: models/pi05_yam`、`format: pi05`、`task: …`、`action_mode: delta` |
 | 2. `configs/run.yaml` | `mode: chunk`、`horizon: 25`、`blend_s: 0.1`、`freeze_left: true` |
 | 3. 运行 | `bash scripts/run_robot.sh`：自动启动服务 → 等待加载 + 编译（约 1–2 分钟，每 10 s 打印进度）→ 对齐 → 回合循环 → 退出时停止服务。也可以临时用 `--task` 覆盖 models.yaml |
 
@@ -247,7 +247,7 @@ flowchart LR
 | 日志 | `runs_infer/pi05_server.log`（每次覆盖）；服务启动失败时把日志末尾打印出来 |
 | 停止 | 正常退出、`q`、Ctrl+C、报错都会停止（先 SIGTERM，15 s 后 SIGKILL）。服务在独立进程组，Ctrl+C 不会直接打断它 |
 | 进程被 `kill -9` | 服务会留下；下次 `run_robot.sh` 发现端口有服务、且模型一致，就直接复用 |
-| 不用自动启动 | 去掉 `model_dir`，自己在任何 GPU 机启动：`PYTHONPATH=<本项目> <openpi python> -m yam_infer.pi05_server --model models/pi05_yam --host 0.0.0.0 --port 8000`，`server:` 写那台机的地址 |
+| 不用自动启动 | 去掉 `model_dir`，自己在任何 GPU 机启动：`PYTHONPATH=<本项目> <openpi python> -m yam_infer.pi05_server --model models/pi05_yam --host 0.0.0.0 --port 8100`，`server:` 写那台机的地址 |
 
 - 一个模型同时会两个任务，`task` 决定发给模型的英文指令。
 - 起始姿态、动作范围（安全过滤用）、fps 和相机列表都由服务在连接时发过来。
