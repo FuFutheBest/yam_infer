@@ -45,8 +45,9 @@ def test_models_config_pi05(tmp_path: Path) -> None:
             load_model_config(f)
 
 
-def test_commented_pi05_block_is_valid(tmp_path: Path) -> None:
-    from yam_infer.config import DEFAULT_MODELS_CONFIG
+def test_pi05_block_of_models_yaml_is_valid(tmp_path: Path) -> None:
+    """The pi05 block of configs/models.yaml, active or commented out."""
+    from yam_infer.config import DEFAULT_MODELS_CONFIG, PROJECT_ROOT
 
     lines = DEFAULT_MODELS_CONFIG.read_text().splitlines()
     start = lines.index(
@@ -54,12 +55,30 @@ def test_commented_pi05_block_is_valid(tmp_path: Path) -> None:
     )
     block = []
     for ln in lines[start + 1 :]:
-        if not ln.startswith("# ") or ln.startswith("# ----"):
+        if ln.startswith("# ") and not ln.startswith("# ----"):
+            block.append(ln[2:])
+        elif ln.strip() and not ln.startswith("#"):
+            block.append(ln)
+        else:
             break
-        block.append(ln[2:])
     f = tmp_path / "models.yaml"
     f.write_text("\n".join(block) + "\n")
-    assert load_model_config(f).format == "pi05"
+    m = load_model_config(f)
+    assert m.format == "pi05"
+    assert m.model_dir == PROJECT_ROOT / "models/pi05_yam"
+
+
+def test_models_config_pi05_model_dir(tmp_path: Path) -> None:
+    from yam_infer.config import PROJECT_ROOT
+
+    f = tmp_path / "models.yaml"
+    f.write_text(PI05 + "  model_dir: models/pi05_yam\n")
+    assert load_model_config(f).model_dir == PROJECT_ROOT / "models/pi05_yam"
+    f.write_text(PI05)
+    assert load_model_config(f).model_dir is None
+    f.write_text(PI05.replace("127.0.0.1", "10.0.0.5") + "  model_dir: models/pi05_yam\n")
+    with pytest.raises(ValueError, match="local"):
+        load_model_config(f)
 
 
 def test_resize_with_pad_matches_openpi() -> None:

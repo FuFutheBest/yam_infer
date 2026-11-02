@@ -15,6 +15,21 @@ from .fake_act_ref import make_act_ref_ckpt
 
 def test_project_models_config() -> None:
     m = load_model_config(DEFAULT_MODELS_CONFIG)
+    assert (m.format, m.task, m.action_mode) == ("pi05", "put_block_in_bowl", "delta")
+    assert m.model_dir is not None and m.model_dir.is_absolute() and m.model_dir.name == "pi05_yam"
+
+
+def test_commented_act_v2_block_is_valid(tmp_path: Path) -> None:
+    lines = DEFAULT_MODELS_CONFIG.read_text().splitlines()
+    start = lines.index("# ---- old act_v2 model (one file, two tasks: choose with `task`) ----")
+    block = []
+    for ln in lines[start + 1 :]:
+        if ln.startswith("# ----") or not ln.startswith("# "):
+            break
+        block.append(ln[2:])
+    f = tmp_path / "models.yaml"
+    f.write_text("\n".join(block) + "\n")
+    m = load_model_config(f)
     assert (m.format, m.task, m.action_mode) == ("act_v2", "put_blue_block_in_blue_cup", "delta")
     assert m.ckpt is not None and m.ckpt.is_absolute() and m.ckpt.name == "act_v2_all.pt"
 

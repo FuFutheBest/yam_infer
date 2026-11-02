@@ -87,12 +87,17 @@ ACTION_MODES = ("delta", "abs")
 class ModelConfig:
     """configs/models.yaml `model:` = the ONE model run_robot.sh runs, and how to read it."""
 
-    ckpt: Path | None  # act_v2 / act_ref: the model file; pi05: none (the model lives in the server)
+    ckpt: (
+        Path | None
+    )  # act_v2 / act_ref: the model file; pi05: none (the model lives in the server)
     format: str  # act_v2 | act_ref | pi05
     task: str
     action_mode: str  # delta | abs
     compensate_action_shift: bool = False
     server: str = ""  # pi05 only: host:port of the openpi policy server
+    # pi05 only, optional: exported model directory -> run.py starts the server itself if none
+    # listens on `server` (local hosts only; yam_infer/policy/pi05_launch.py)
+    model_dir: Path | None = None
 
 
 def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
@@ -103,7 +108,7 @@ def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
     raw = cfg["model"]
     if raw.get("format") == "pi05":  # the network runs in an openpi policy server
         required = ("server", "format", "task", "action_mode")
-        allowed = set(required)
+        allowed = {*required, "model_dir"}
     else:
         required = ("ckpt", "format", "task", "action_mode")
         allowed = {*required, "compensate_action_shift"}
@@ -130,12 +135,25 @@ def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
         host, _, port = raw["server"].rpartition(":")
         if not host or not port.isdigit():
             raise ValueError(f"{path}: model.server = {raw['server']!r}, expected host:port")
+        model_dir = None
+        if "model_dir" in raw:
+            if not isinstance(raw["model_dir"], str) or not raw["model_dir"]:
+                raise ValueError(f"{path}: model.model_dir must be a directory path")
+            if host not in ("127.0.0.1", "localhost", "::1"):
+                raise ValueError(
+                    f"{path}: model.model_dir (start the server automatically) needs a local "
+                    f"server (127.0.0.1:<port>), got {raw['server']!r}; remove model_dir to "
+                    "connect to a server started elsewhere"
+                )
+            model_dir = Path(raw["model_dir"])
+            model_dir = model_dir if model_dir.is_absolute() else PROJECT_ROOT / model_dir
         return ModelConfig(
             ckpt=None,
             format="pi05",
             task=raw["task"],
             action_mode=raw["action_mode"],
             server=raw["server"],
+            model_dir=model_dir,
         )
     ckpt = Path(raw["ckpt"])
     return ModelConfig(

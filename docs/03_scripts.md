@@ -217,23 +217,37 @@ bash scripts/run_robot.sh --remote <GPU 机 IP>:5555
 
 pi0.5 有 3.3B 参数，用 JAX 写成，依赖由 openpi 固定（jax 0.5.3、numpy<2 等），和本项目的环境（numpy 2.2.6）装不到一起。所以网络跑在一个独立的**策略服务**进程里，`yam_infer.run` 只是客户端。这也是 openpi 官方的部署方式。
 
+服务端代码在本项目 `yam_infer/pi05_server/`（从 yam_train `pi05` 分支搬来，见 VENDORED.md），**运行时不需要 yam_train**，只需要一个 openpi 环境（openpi @215abfb + uv `.venv`）和导出的模型目录。
+
 ```mermaid
 flowchart LR
-    subgraph GPU["GPU 机（机器人本机或训练服务器）"]
-        S["openpi 环境<br/>python -m yam_train.pi05.cli serve --model DIR --port 8000"]
-    end
+    RR["run_robot.sh"] --> Y
     subgraph R["机器人"]
-        Y["yam_infer.run<br/>models.yaml: format pi05, server host:8000"]
+        Y["yam_infer.run（本项目 .venv）<br/>models.yaml: format pi05, server 127.0.0.1:8000, model_dir"]
+        S["策略服务（openpi .venv，GPU）<br/>python -m yam_infer.pi05_server --model models/pi05_yam"]
     end
+    Y -->|"端口无人监听 → 自动启动 / 退出时停止"| S
     Y <-->|"websocket（msgpack）<br/>2×224×224 图 + 状态 + 指令 → 50×14 绝对目标"| S
 ```
 
 | 步骤 | 命令 / 配置 |
 |---|---|
-| 1. 启动服务（先启动，加载约 1 分钟） | `source scripts/pi05_env.sh && $PI05_PY -m yam_train.pi05.cli serve --model models/pi05_yam --port 8000`（yam_train `pi05` 分支） |
-| 2. `configs/models.yaml` | 启用文件末尾的 pi05 块：`server: 127.0.0.1:8000`、`format: pi05`、`task: …`、`action_mode: delta` |
-| 3. `configs/run.yaml` | `mode: chunk`、`horizon: 25`、`blend_s: 0.1`、`freeze_left: true` |
-| 4. 运行 | `bash scripts/run_robot.sh`。也可以临时用 `--server host:port` 或 `--task` 覆盖 models.yaml |
+| 1. `configs/models.yaml` | pi05 块：`server: 127.0.0.1:8000`、`model_dir: models/pi05_yam`、`format: pi05`、`task: …`、`action_mode: delta` |
+| 2. `configs/run.yaml` | `mode: chunk`、`horizon: 25`、`blend_s: 0.1`、`freeze_left: true` |
+| 3. 运行 | `bash scripts/run_robot.sh`：自动启动服务 → 等待加载 + 编译（约 1–2 分钟，每 10 s 打印进度）→ 对齐 → 回合循环 → 退出时停止服务。也可以临时用 `--task` 覆盖 models.yaml |
+
+自动启动的细节（`yam_infer/policy/pi05_launch.py`）：
+
+| 项 | 行为 |
+|---|---|
+| 何时启动 | 有 `model_dir`，且 `server` 端口没有进程监听。`model_dir` 只能配本机地址（127.0.0.1 / localhost） |
+| 端口已有服务 | 直接使用，但要求它服务的就是 `model_dir`（比较 config / experiment / step / repo_id），否则报错退出 |
+| openpi 的 python | `OPENPI_PY` → `$OPENPI_DIR/.venv/bin/python` → 默认 `<项目>/../openpi`、`~/fufu/astra_inference_train/openpi`（机器人上现有的 openpi @215abfb 环境）。可在 `robot.env` 里 `export OPENPI_DIR=...` |
+| 显存 | 默认 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.5`（JAX 默认会占 75%，显卡上可能有别人的进程）；在 `robot.env` 里 export 可改 |
+| 日志 | `runs_infer/pi05_server.log`（每次覆盖）；服务启动失败时把日志末尾打印出来 |
+| 停止 | 正常退出、`q`、Ctrl+C、报错都会停止（先 SIGTERM，15 s 后 SIGKILL）。服务在独立进程组，Ctrl+C 不会直接打断它 |
+| 进程被 `kill -9` | 服务会留下；下次 `run_robot.sh` 发现端口有服务、且模型一致，就直接复用 |
+| 不用自动启动 | 去掉 `model_dir`，自己在任何 GPU 机启动：`PYTHONPATH=<本项目> <openpi python> -m yam_infer.pi05_server --model models/pi05_yam --host 0.0.0.0 --port 8000`，`server:` 写那台机的地址 |
 
 - 一个模型同时会两个任务，`task` 决定发给模型的英文指令。
 - 起始姿态、动作范围（安全过滤用）、fps 和相机列表都由服务在连接时发过来。

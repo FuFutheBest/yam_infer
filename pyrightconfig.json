@@ -9,6 +9,7 @@
     ".venv",
     "runs_infer*",
     "models",
-    "yam_infer/policy/detr"
+    "yam_infer/policy/detr",
+    "yam_infer/pi05_server"
   ]
 }

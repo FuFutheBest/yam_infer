@@ -59,7 +59,18 @@ def _models() -> str:
 
     m = load_model_config()
     if m.ckpt is None:  # pi05: the model lives in the policy server (checked when run starts)
-        return f"pi05 policy server {m.server}, task {m.task} (server not contacted here)"
+        if m.model_dir is None:
+            return f"pi05 policy server {m.server}, task {m.task} (server not contacted here)"
+        from yam_infer.policy.pi05_launch import find_openpi_python, read_model_meta
+
+        meta = read_model_meta(m.model_dir)
+        if m.task not in meta["prompts"]:
+            raise ValueError(f"{m.model_dir.name} knows {list(meta['prompts'])}, not {m.task}")
+        py = find_openpi_python()
+        return (
+            f"pi05 {m.model_dir.name} (step {meta.get('step')}), task {m.task}, "
+            f"server auto-start on {m.server} with {py}"
+        )
     if not m.ckpt.is_file():
         raise FileNotFoundError(f"{m.ckpt} missing (copy it from the user PC)")
     pol = Policy(m.ckpt, "cpu")

@@ -26,12 +26,12 @@
 #   execution: {mode: ensemble, ensemble_m: 0.01}
 
 # ---- old act_v2 model (one file, two tasks: choose with `task`) ----
-model:
-  ckpt: models/act_v2_all.pt
-  format: act_v2
-  # put_blue_block_in_blue_cup | put_banana_in_bowl
-  task: put_blue_block_in_blue_cup
-  action_mode: delta
+# model:
+#   ckpt: models/act_v2_all.pt
+#   format: act_v2
+#   # put_blue_block_in_blue_cup | put_banana_in_bowl
+#   task: put_blue_block_in_blue_cup
+#   action_mode: delta
 
 # ---- new yam_train act_ref model (one task per file) ----
 # model:
@@ -42,16 +42,28 @@ model:
 #   compensate_action_shift: false
 
 # ---- yam_train pi05 model (one model, both tasks; runs in a policy server) ----
-# model:
-#   server: 127.0.0.1:8000
-#   format: pi05
-#   task: put_block_in_bowl
-#   action_mode: delta
+model:
+  server: 127.0.0.1:8000
+  model_dir: models/pi05_yam
+  format: pi05
+  task: put_block_in_bowl
+  action_mode: delta
 #
-# pi05 = pi0.5 (openpi, 3.3B parameters) fine-tuned by yam_train (pi05 branch).  The network does not
-# run in this process: start the policy server first (openpi venv, GPU; on this PC or elsewhere):
-#   python -m yam_train.pi05.cli serve --model models/pi05/pi05_yam --port 8000
-#   server       host:port of that server (127.0.0.1 = this PC)
+# pi05 = pi0.5 (openpi, 3.3B parameters) fine-tuned by yam_train
+# (pi05 branch).  The network runs in a separate policy server
+# process (openpi venv, GPU).  With model_dir, run_robot.sh starts
+# it itself when nothing listens on `server` (~1-2 min to load) and
+# stops it at exit; log: runs_infer/pi05_server.log.  openpi venv:
+# OPENPI_DIR in robot.env (run_robot.sh has a default).
+#   server       host:port of the server (127.0.0.1 = this PC)
+#   model_dir    exported model directory (yam_model.json, params/,
+#                assets/), relative to the project root.  Local
+#                server only.  If a server already listens, it is
+#                used (it must serve model_dir).  Without model_dir,
+#                start the server yourself (any machine):
+#                  PYTHONPATH=<this project> <openpi python>
+#                  -m yam_infer.pi05_server --model models/pi05_yam
+#                  --host 0.0.0.0 --port 8000
 #   task         put_block_in_bowl | put_blue_block_in_blue_cup (one model; the task picks the prompt)
 #   action_mode  delta (the server already returns absolute targets; checked against the server)
 # run.yaml for pi05: execution {mode: chunk, horizon: 25, blend_s: 0.1} (plan = 50 steps = 1.7 s)

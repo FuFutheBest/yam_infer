@@ -313,6 +313,8 @@ def build_run_meta(args) -> dict:
     import subprocess
 
     meta: dict = {"host": platform.node()}
+    if getattr(args, "pi05_model_dir", None):  # pi05: the server's model directory
+        meta["pi05_model_dir"] = str(args.pi05_model_dir)
     try:
         h = hashlib.sha256()
         with open(args.ckpt, "rb") as fh:
@@ -495,12 +497,24 @@ def main() -> None:
     if args.max_seconds is None:
         args.max_seconds = run_cfg["episode"]["max_seconds"]
     args.compensate_action_shift = model_cfg.compensate_action_shift
+    args.pi05_model_dir = model_cfg.model_dir
     print(f"task: {args.task}  model: {args.ckpt}")
 
+    pi05_server = None  # the policy server process we started (None: not ours / not pi05)
     if is_pi05:
         from yam_infer.policy.pi05 import Pi05Policy
+        from yam_infer.policy.pi05_launch import PolicyServer, check_same_model
 
-        policy = Pi05Policy(model_cfg.server, jpeg_roundtrip=not args.no_jpeg_roundtrip)
+        try:  # models.yaml model_dir: start the server unless one already listens
+            pi05_server = PolicyServer.ensure(model_cfg, Path(args.record_dir))
+            policy = Pi05Policy(model_cfg.server, jpeg_roundtrip=not args.no_jpeg_roundtrip)
+            if model_cfg.model_dir is not None and pi05_server is None:
+                check_same_model(policy.meta, model_cfg.model_dir)
+        except KeyboardInterrupt:
+            print("interrupted")
+            sys.exit(130)  # atexit stops the server we started
+        except (FileNotFoundError, RuntimeError, TimeoutError, ConnectionError, ValueError) as exc:
+            sys.exit(f"error: {exc}")
     elif args.remote:
         from yam_infer.policy.server import RemotePolicy
 
@@ -596,6 +610,8 @@ def main() -> None:
             park_and_release(arms, start_pose, rest_pose, args.park)
         if cams is not None:
             cams.close()
+        if pi05_server is not None:
+            pi05_server.stop()  # frees the GPU (atexit would do it too)
 
 
 if __name__ == "__main__":
