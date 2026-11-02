@@ -6,4 +6,4 @@ runs_infer/
 runs_infer_dryrun/
 sample_episodes/
 robot.env
-models/*.pt
+models/
