@@ -40,6 +40,11 @@ control:
   #               --freeze-right / --no-freeze-right
   freeze_left: false
   freeze_right: false
+  # models/act_ref_r3 (models.yaml): one-handed task -> freeze the
+  # left arm; bimanual tasks need it free:
+  #   put_blue_block_in_blue_cup:      freeze_left: true
+  #   fold_towel / unroll_cylinder:    freeze_left: false
+  # (or per run: --freeze-left / --no-freeze-left)
 
 episode:
   # an episode ends ("max_seconds") after this many seconds of

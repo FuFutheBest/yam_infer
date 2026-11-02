@@ -40,3 +40,34 @@ model:
 #   task: put_banana_in_bowl
 #   action_mode: delta          # banana_abs.pt -> abs
 #   compensate_action_shift: false
+
+# ---- yam_train act_ref, round 3 (2026-11-02): models/act_ref_r3/ ----
+# Trained on every demo (_all runs, epoch 19999).  Offline test on held-out
+# demos: delta aims the grasp much better than abs for all three tasks ->
+# try delta first.  freeze_left in run.yaml (see there):
+#   blue_cup: true (right arm only)   fold_towel / unroll_cylinder: FALSE
+#   (both arms work; a frozen left arm makes these tasks fail)
+#
+# put_blue_block_in_blue_cup (100 demos), right arm only:
+# model:
+#   ckpt: models/act_ref_r3/blue_cup_delta.pt
+#   format: act_ref
+#   task: put_blue_block_in_blue_cup
+#   action_mode: delta          # blue_cup_abs.pt -> abs
+#   compensate_action_shift: false
+#
+# fold_towel (51 demos), both arms:
+# model:
+#   ckpt: models/act_ref_r3/fold_towel_delta.pt
+#   format: act_ref
+#   task: fold_towel
+#   action_mode: delta          # fold_towel_abs.pt -> abs
+#   compensate_action_shift: false
+#
+# unroll_cylinder (50 demos), both arms:
+# model:
+#   ckpt: models/act_ref_r3/unroll_cylinder_delta.pt
+#   format: act_ref
+#   task: unroll_cylinder
+#   action_mode: delta          # unroll_cylinder_abs.pt -> abs
+#   compensate_action_shift: false
