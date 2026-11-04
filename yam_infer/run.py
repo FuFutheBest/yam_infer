@@ -313,6 +313,8 @@ def build_run_meta(args) -> dict:
     import subprocess
 
     meta: dict = {"host": platform.node()}
+    if getattr(args, "pi05_model_dir", None):  # pi05: the server's model directory
+        meta["pi05_model_dir"] = str(args.pi05_model_dir)
     try:
         h = hashlib.sha256()
         with open(args.ckpt, "rb") as fh:
@@ -367,6 +369,11 @@ def main() -> None:
         "--remote",
         default="",
         help="host:port of `python -m yam_infer.policy.server` (GPU elsewhere)",
+    )
+    p.add_argument(
+        "--server",
+        default=None,
+        help="pi05 only, one-off: other policy server (host:port) than models.yaml",
     )
     p.add_argument("--device", default="auto")
     p.add_argument("--no-jpeg-roundtrip", action="store_true")
@@ -455,16 +462,24 @@ def main() -> None:
         model_cfg = load_model_config(args.models_config)
     except ValueError as exc:
         p.error(str(exc))
-    if args.ckpt is not None or args.task is not None:
+    is_pi05 = model_cfg.format == "pi05"
+    if is_pi05 and (args.ckpt is not None or args.remote):
+        p.error("pi05 models run in their policy server: use models.yaml server / --server")
+    if not is_pi05 and args.server is not None:
+        p.error("--server is for pi05 models (models.yaml format: pi05)")
+    if args.ckpt is not None or args.task is not None or args.server is not None:
         from dataclasses import replace
 
         model_cfg = replace(
             model_cfg,
             ckpt=Path(args.ckpt) if args.ckpt is not None else model_cfg.ckpt,
             task=args.task if args.task is not None else model_cfg.task,
+            server=args.server if args.server is not None else model_cfg.server,
         )
-    args.task, args.ckpt = model_cfg.task, str(model_cfg.ckpt)
-    if not args.remote and not Path(args.ckpt).is_file():
+    # pi05: no model file; recorded as pi05://host:port (the server's model is in policy info)
+    args.task = model_cfg.task
+    args.ckpt = f"pi05://{model_cfg.server}" if is_pi05 else str(model_cfg.ckpt)
+    if not is_pi05 and not args.remote and not Path(args.ckpt).is_file():
         p.error(f"model file not found: {args.ckpt} ({args.models_config})")
     ex = run_cfg["execution"]  # command line > run.yaml
     for arg, key in (
@@ -482,9 +497,25 @@ def main() -> None:
     if args.max_seconds is None:
         args.max_seconds = run_cfg["episode"]["max_seconds"]
     args.compensate_action_shift = model_cfg.compensate_action_shift
+    args.pi05_model_dir = model_cfg.model_dir
     print(f"task: {args.task}  model: {args.ckpt}")
 
-    if args.remote:
+    pi05_server = None  # the policy server process we started (None: not ours / not pi05)
+    if is_pi05:
+        from yam_infer.policy.pi05 import Pi05Policy
+        from yam_infer.policy.pi05_launch import PolicyServer, check_same_model
+
+        try:  # models.yaml model_dir: start the server unless one already listens
+            pi05_server = PolicyServer.ensure(model_cfg, Path(args.record_dir))
+            policy = Pi05Policy(model_cfg.server, jpeg_roundtrip=not args.no_jpeg_roundtrip)
+            if model_cfg.model_dir is not None and pi05_server is None:
+                check_same_model(policy.meta, model_cfg.model_dir)
+        except KeyboardInterrupt:
+            print("interrupted")
+            sys.exit(130)  # atexit stops the server we started
+        except (FileNotFoundError, RuntimeError, TimeoutError, ConnectionError, ValueError) as exc:
+            sys.exit(f"error: {exc}")
+    elif args.remote:
         from yam_infer.policy.server import RemotePolicy
 
         policy = RemotePolicy(args.remote, jpeg_roundtrip=not args.no_jpeg_roundtrip)
@@ -579,6 +610,8 @@ def main() -> None:
             park_and_release(arms, start_pose, rest_pose, args.park)
         if cams is not None:
             cams.close()
+        if pi05_server is not None:
+            pi05_server.stop()  # frees the GPU (atexit would do it too)
 
 
 if __name__ == "__main__":

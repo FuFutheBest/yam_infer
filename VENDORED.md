@@ -17,6 +17,9 @@
 | `yam_infer/policy/act_ref.py` 的 `SOURCE_DEFAULTS` / `make_args` | `yam_train/policy.py` | 只保留推理分支（无优化器、无损失） |
 | `yam_infer/data/nedf3_schemas/*.desc` | SI 采集文件里嵌入的 protobuf 定义（`nmx.msg.Metadata` / `ArmState` / `HandState` / `RGBD`），用 `scripts/extract_nedf3_schemas.py` 提取 | 无（原样字节） |
 | `yam_infer/data/nedf3_writer.py` 的话题、字段用法 | `consumer/io/nedf3_i2rt_contract.py`、`async_data_saver_i2rt_NEDF3.py` | 自己实现（不用 dm3_core）；`header.seq` / `stamp` 填值；夹爪 100 Hz；无主臂话题 |
+| `yam_infer/policy/pi05.py` 的 `_pack_array` / `_unpack_array`、`resize_with_pad` | openpi @215abfb `packages/openpi-client/src/openpi_client/{msgpack_numpy,image_tools}.py`（Apache-2.0） | 逻辑不变；只保留单张图像版本的 resize_with_pad；客户端（websocket）按 `websocket_client_policy.py` 自写（加了等待超时、元数据格式检查） |
+| `yam_infer/pi05_server/yam_policy.py` | yam_train `pi05` @54588b2 `yam_train/pi05/yam_policy.py` | 只保留推理用部分（`YamInputs` / `YamOutputs` / `DELTA_MASK*`）；`make_bool_mask` 换成等价的本地 `_mask`；新增 `delta_mask_for`（从 yam_model.json 的 `delta_joints` 或 config 名取 delta 掩码） |
+| `yam_infer/pi05_server/__main__.py` | yam_train `pi05` @54588b2 `yam_train/pi05/cli.py` 的 `serve` + `config.py` 的数据配置 | 不注册 openpi 配置表：从 yam_model.json 重建推理需要的 TrainConfig（模型形状、数据变换、归一化统计取自模型目录 `assets/`）；无训练部分；默认只监听 127.0.0.1 |
 | `tests/test_follower_runtime.py` | `tests/devices/test_i2rt_teleop_watchdog.py` | 只移植 runtime 相关用例 |
 
 ## 不再需要的 SI 东西

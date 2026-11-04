@@ -7,6 +7,8 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 [ -f robot.env ] && . ./robot.env # machine-specific: HW_CONFIG, optional CKPT override
 HW_CONFIG="${HW_CONFIG:-configs/hardware.yaml}"
+# pi05 models (models.yaml format: pi05 + model_dir): yam_infer.run starts the policy server itself
+# (openpi venv: OPENPI_DIR in robot.env, defaults in yam_infer/policy/pi05_launch.py)
 [ -x .venv/bin/python ] || { echo "错误：没有 .venv，先执行 bash scripts/setup_robot.sh"; exit 1; }
 CKPT_ARGS=()
 [ -n "${CKPT:-}" ] && CKPT_ARGS=(--ckpt "$CKPT") # robot.env / env override of models.yaml

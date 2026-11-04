@@ -77,8 +77,9 @@ def load_run_config(path: Path = DEFAULT_RUN_CONFIG) -> dict[str, dict]:
     return out
 
 
-FORMATS = ("act_v2", "act_ref")
-FORMAT_IDS = {"act_v2": "act_v2", "act_ref": "yam_train/act_ref-v1"}  # value in the checkpoint
+FORMATS = ("act_v2", "act_ref", "pi05")
+# value in the checkpoint (pi05: in the metadata the policy server sends)
+FORMAT_IDS = {"act_v2": "act_v2", "act_ref": "yam_train/act_ref-v1", "pi05": "yam_train/pi05-v1"}
 ACTION_MODES = ("delta", "abs")
 
 
@@ -86,11 +87,17 @@ ACTION_MODES = ("delta", "abs")
 class ModelConfig:
     """configs/models.yaml `model:` = the ONE model run_robot.sh runs, and how to read it."""
 
-    ckpt: Path
-    format: str  # act_v2 | act_ref
+    ckpt: (
+        Path | None
+    )  # act_v2 / act_ref: the model file; pi05: none (the model lives in the server)
+    format: str  # act_v2 | act_ref | pi05
     task: str
     action_mode: str  # delta | abs
     compensate_action_shift: bool = False
+    server: str = ""  # pi05 only: host:port of the openpi policy server
+    # pi05 only, optional: exported model directory -> run.py starts the server itself if none
+    # listens on `server` (local hosts only; yam_infer/policy/pi05_launch.py)
+    model_dir: Path | None = None
 
 
 def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
@@ -99,8 +106,12 @@ def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
     if set(cfg) != {"model"} or not isinstance(cfg["model"], dict):
         raise ValueError(f"{path}: expected exactly one section 'model' (comment out the others)")
     raw = cfg["model"]
-    required = ("ckpt", "format", "task", "action_mode")
-    allowed = {*required, "compensate_action_shift"}
+    if raw.get("format") == "pi05":  # the network runs in an openpi policy server
+        required = ("server", "format", "task", "action_mode")
+        allowed = {*required, "model_dir"}
+    else:
+        required = ("ckpt", "format", "task", "action_mode")
+        allowed = {*required, "compensate_action_shift"}
     extra = sorted(set(raw) - allowed)
     if "execution" in extra:
         raise ValueError(
@@ -120,6 +131,30 @@ def load_model_config(path: Path = DEFAULT_MODELS_CONFIG) -> ModelConfig:
     comp = raw.get("compensate_action_shift", False)
     if not isinstance(comp, bool):
         raise ValueError(f"{path}: model.compensate_action_shift must be true/false")
+    if raw["format"] == "pi05":
+        host, _, port = raw["server"].rpartition(":")
+        if not host or not port.isdigit():
+            raise ValueError(f"{path}: model.server = {raw['server']!r}, expected host:port")
+        model_dir = None
+        if "model_dir" in raw:
+            if not isinstance(raw["model_dir"], str) or not raw["model_dir"]:
+                raise ValueError(f"{path}: model.model_dir must be a directory path")
+            if host not in ("127.0.0.1", "localhost", "::1"):
+                raise ValueError(
+                    f"{path}: model.model_dir (start the server automatically) needs a local "
+                    f"server (127.0.0.1:<port>), got {raw['server']!r}; remove model_dir to "
+                    "connect to a server started elsewhere"
+                )
+            model_dir = Path(raw["model_dir"])
+            model_dir = model_dir if model_dir.is_absolute() else PROJECT_ROOT / model_dir
+        return ModelConfig(
+            ckpt=None,
+            format="pi05",
+            task=raw["task"],
+            action_mode=raw["action_mode"],
+            server=raw["server"],
+            model_dir=model_dir,
+        )
     ckpt = Path(raw["ckpt"])
     return ModelConfig(
         ckpt=ckpt if ckpt.is_absolute() else PROJECT_ROOT / ckpt,
@@ -142,6 +177,5 @@ def check_model_matches(cfg: ModelConfig, fmt: str, tasks: list[str], action_mod
             f"action_mode: file was trained with {action_mode!r}, models.yaml says {cfg.action_mode!r}"
         )
     if problems:
-        raise ValueError(
-            f"{cfg.ckpt.name} does not match configs/models.yaml: " + "; ".join(problems)
-        )
+        name = cfg.ckpt.name if cfg.ckpt is not None else f"pi05 server {cfg.server}"
+        raise ValueError(f"{name} does not match configs/models.yaml: " + "; ".join(problems))

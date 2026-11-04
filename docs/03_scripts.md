@@ -212,3 +212,46 @@ python -m yam_infer.policy.server --ckpt models/act_v2_all.pt --host <局域网 
 # 机器人
 bash scripts/run_robot.sh --remote <GPU 机 IP>:5555
 ```
+
+## 10. pi0.5 模型（`format: pi05`，`pi05` 分支）
+
+pi0.5 有 3.3B 参数，用 JAX 写成，依赖由 openpi 固定（jax 0.5.3、numpy<2 等），和本项目的环境（numpy 2.2.6）装不到一起。所以网络跑在一个独立的**策略服务**进程里，`yam_infer.run` 只是客户端。这也是 openpi 官方的部署方式。
+
+服务端代码在本项目 `yam_infer/pi05_server/`（从 yam_train `pi05` 分支搬来，见 VENDORED.md），**运行时不需要 yam_train**，只需要一个 openpi 环境（openpi @215abfb + uv `.venv`）和导出的模型目录。
+
+```mermaid
+flowchart LR
+    RR["run_robot.sh"] --> Y
+    subgraph R["机器人"]
+        Y["yam_infer.run（本项目 .venv）<br/>models.yaml: format pi05, server 127.0.0.1:8100, model_dir"]
+        S["策略服务（openpi .venv，GPU）<br/>python -m yam_infer.pi05_server --model models/pi05_yam"]
+    end
+    Y -->|"端口无人监听 → 自动启动 / 退出时停止"| S
+    Y <-->|"websocket（msgpack）<br/>2×224×224 图 + 状态 + 指令 → 50×14 绝对目标"| S
+```
+
+| 步骤 | 命令 / 配置 |
+|---|---|
+| 1. `configs/models.yaml` | pi05 块：`server: 127.0.0.1:8100`、`model_dir: models/pi05_yam`、`format: pi05`、`task: …`、`action_mode: delta` |
+| 2. `configs/run.yaml` | `mode: chunk`、`horizon: 25`、`blend_s: 0.1`、`freeze_left: true` |
+| 3. 运行 | `bash scripts/run_robot.sh`：自动启动服务 → 等待加载 + 编译（约 1–2 分钟，每 10 s 打印进度）→ 对齐 → 回合循环 → 退出时停止服务。也可以临时用 `--task` 覆盖 models.yaml |
+
+自动启动的细节（`yam_infer/policy/pi05_launch.py`）：
+
+| 项 | 行为 |
+|---|---|
+| 何时启动 | 有 `model_dir`，且 `server` 端口没有进程监听。`model_dir` 只能配本机地址（127.0.0.1 / localhost） |
+| 端口已有服务 | 直接使用，但要求它服务的就是 `model_dir`（比较 config / experiment / step / repo_id），否则报错退出 |
+| openpi 的 python | `OPENPI_PY` → `$OPENPI_DIR/.venv/bin/python` → 默认 `<项目>/../openpi`、`~/fufu/astra_inference_train/openpi`（机器人上现有的 openpi @215abfb 环境）。可在 `robot.env` 里 `export OPENPI_DIR=...` |
+| 显存 | 默认 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.5`（JAX 默认会占 75%，显卡上可能有别人的进程）；在 `robot.env` 里 export 可改 |
+| 日志 | `runs_infer/pi05_server.log`（每次覆盖）；服务启动失败时把日志末尾打印出来 |
+| 停止 | 正常退出、`q`、Ctrl+C、报错都会停止（先 SIGTERM，15 s 后 SIGKILL）。服务在独立进程组，Ctrl+C 不会直接打断它 |
+| 进程被 `kill -9` | 服务会留下；下次 `run_robot.sh` 发现端口有服务、且模型一致，就直接复用 |
+| 不用自动启动 | 去掉 `model_dir`，自己在任何 GPU 机启动：`PYTHONPATH=<本项目> <openpi python> -m yam_infer.pi05_server --model models/pi05_yam --host 0.0.0.0 --port 8100`，`server:` 写那台机的地址 |
+
+- 一个模型同时会两个任务，`task` 决定发给模型的英文指令。
+- 起始姿态、动作范围（安全过滤用）、fps 和相机列表都由服务在连接时发过来。
+- 图像预处理和训练完全一致：先做 JPEG q90 往返（用录制器的编码器），再用 `resize_with_pad` 缩放到 224×224（PIL 双线性，等比缩放后上下补黑边）。
+- 依赖：`websockets`、`pillow`（已写入 requirements.txt）。
+- 已验证：在用户电脑上用 `--dry-run` 回放录制数据，经 SSH 隧道连到服务器上的策略服务（训练 1000 步的模型，CPU 推理），整条链路正常。
+- **未验证**：机器人 RTX 5090（Blackwell）上能否直接运行 JAX 0.5.3。如果报 `ptxas too old`，可以换新版 `nvidia-cuda-nvcc-cu12`（≥12.8），或者改把服务放到训练服务器上跑，用 SSH 隧道连接。

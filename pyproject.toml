@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 # Exact robot pins live in requirements.txt (torch comes from the CUDA 12.8 index, see scripts/setup_robot.sh).
 dependencies = [
   "torch", "torchvision", "numpy", "opencv-python-headless", "pyrealsense2",
-  "portal==3.7.3", "pyyaml", "matplotlib", "mcap", "mcap-protobuf-support", "protobuf",
+  "portal==3.7.3", "pyyaml", "matplotlib", "websockets>=13", "pillow", "mcap", "mcap-protobuf-support", "protobuf",
   # follower worker + vendored i2rt SDK (third_party/i2rt, put on PYTHONPATH by the worker launcher)
   "python-can==4.5.0", "msgpack~=1.1.0", "crcmod-plus", "dm-env==1.6", "mcap-ros2-support",
   "mujoco", "pydantic>=2", "tyro", "packaging",
